@@ -578,8 +578,9 @@ export default function App() {
                           <span className="font-extrabold text-xs text-zinc-900 group-hover:text-[#f68b1e] transition-colors">DONCHIKE</span>
                           <span className="text-blue-500 text-[10px] font-bold">✔</span>
                         </div>
-                        <h3 className="text-xs text-gray-600 line-clamp-2 min-h-[2rem] leading-tight font-medium">
-                          {p.name} {p.description && `• ${p.description}`}
+                        {/* UPDATE: Name is now bolder and larger */}
+                        <h3 className="text-sm md:text-base text-black line-clamp-2 min-h-[2.5rem] leading-tight font-extrabold">
+                          {p.name} {p.description && <span className="font-normal text-gray-500 text-xs"> • {p.description}</span>}
                         </h3>
                         
                         <div className="flex items-center space-x-1 mt-1.5">
@@ -591,7 +592,8 @@ export default function App() {
                       </div>
                       
                       <div className="mt-3">
-                        <p className="text-sm font-black text-[#f68b1e] tracking-tight">{p.price.toLocaleString()} CFA</p>
+                        {/* UPDATE: Price is now much larger and highly visible */}
+                        <p className="text-lg md:text-xl font-black text-[#f68b1e] tracking-tight mb-2">{p.price.toLocaleString()} CFA</p>
 
                         <div className="mt-2.5">
                           {isOutOfStock ? (
@@ -773,7 +775,7 @@ export default function App() {
                           <tr key={p.id} className={`hover:bg-gray-50/50 ${editingProduct?.id === p.id ? 'bg-orange-50/50' : ''}`}>
                             <td className="p-2.5 flex items-center space-x-2">
                               <img src={p.image_url} alt="" className="w-8 h-8 object-cover rounded border" />
-                              <span className="font-bold text-gray-900 line-clamp-1">{p.name}</span>
+                              <span className="font-extrabold text-black line-clamp-1">{p.name}</span>
                             </td>
                             <td className="p-2.5 font-bold text-gray-700">{p.price.toLocaleString()} CFA</td>
                             <td className="p-2.5 text-center">
@@ -846,8 +848,8 @@ export default function App() {
                       <div className="flex items-center space-x-2.5">
                         <img src={item.image_url} alt="" className="w-10 h-10 object-cover rounded bg-white border" />
                         <div>
-                          <h4 className="text-xs font-bold text-gray-900 line-clamp-1">{item.name}</h4>
-                          <p className="text-xs font-bold text-[#f68b1e]">{item.price.toLocaleString()} CFA</p>
+                          <h4 className="text-sm font-extrabold text-black line-clamp-1">{item.name}</h4>
+                          <p className="text-sm font-black text-[#f68b1e]">{item.price.toLocaleString()} CFA</p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-1.5 bg-white border rounded p-0.5">
