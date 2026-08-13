@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './utils/supabaseClient';
-import { ShoppingCart, ShoppingBag, ShieldCheck, Smartphone, Star, Heart, Trash2, Pencil, Video, Search, X, LogOut } from 'lucide-react';
+import { ShoppingCart, ShieldCheck, Smartphone, Star, Heart, Trash2, Pencil, Video, Search, X, LogOut } from 'lucide-react';
 
 export default function App() {
   const [view, setView] = useState('client'); 
@@ -59,7 +59,7 @@ export default function App() {
         .order('created_at', { ascending: false });
       if (!error && data) setProducts(data);
     } catch (err) {
-      console.error("Fetch Error: ", err);
+      console.error("Erreur de récupération: ", err);
     }
   };
 
@@ -82,7 +82,7 @@ export default function App() {
         setAdminPassword('');
       }
     } catch (err) {
-      setAuthError('An unexpected authentication error occurred.');
+      setAuthError('Une erreur d\'authentification inattendue est survenue.');
     } finally {
       setAuthLoading(false);
     }
@@ -117,7 +117,6 @@ export default function App() {
           let width = img.width;
           let height = img.height;
 
-          // Calculate new dimensions maintaining aspect ratio
           if (width > height) {
             if (width > maxWidth) {
               height = Math.round((height * maxWidth) / width);
@@ -136,18 +135,16 @@ export default function App() {
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
 
-          // Convert canvas back to a compressed JPEG file blob
           canvas.toBlob(
             (blob) => {
               if (blob) {
-                // Convert blob back to a File object
                 const compressedFile = new File([blob], file.name, {
                   type: 'image/jpeg',
                   lastModified: Date.now(),
                 });
                 resolve(compressedFile);
               } else {
-                reject(new Error('Canvas compression failed'));
+                reject(new Error('Échec de la compression d\'image'));
               }
             },
             'image/jpeg',
@@ -199,11 +196,11 @@ export default function App() {
 
   const handleWhatsAppCheckout = () => {
     if (cart.length === 0) return;
-    let msg = '✨ *DONCHIKE COSMETICS - NEW ORDER* ✨\n------------------------------------------\n\n';
+    let msg = '✨ *DONCHIKE COSMETICS - NOUVELLE COMMANDE* ✨\n------------------------------------------\n\n';
     cart.forEach((item, idx) => {
-      msg += `🛍️ *${idx + 1}. ${item.name}*\n   Price: ${item.price.toLocaleString()} CFA\n   Qty: ${item.quantity}\n------------------------------------------\n`;
+      msg += `🛍️ *${idx + 1}. ${item.name}*\n   Prix: ${item.price.toLocaleString()} FCFA\n   Qté: ${item.quantity}\n------------------------------------------\n`;
     });
-    msg += `\n🎯 *GRAND TOTAL:* ${cartTotal.toLocaleString()} CFA\n\nConfirming availability for immediate dispatch!`;
+    msg += `\n🎯 *TOTAL GÉNÉRAL:* ${cartTotal.toLocaleString()} FCFA\n\nMerci de confirmer la disponibilité pour expédition immédiate !`;
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
@@ -220,17 +217,17 @@ export default function App() {
     if (!error) {
       setProducts(prev => prev.map(p => p.id === id ? { ...p, quantity: parsedVolume, stock_status: parsedVolume > 0 } : p));
     } else {
-      alert(`Permission Denied: ${error.message}`);
+      alert(`Permission refusée: ${error.message}`);
     }
   };
 
   const handleDeleteProduct = async (id) => {
-    if (!window.confirm('Delete this item from listing?')) return;
+    if (!window.confirm('Voulez-vous vraiment supprimer cet article de la liste ?')) return;
     const { error } = await supabase.from('products').delete().eq('id', id);
     if (!error) {
       setProducts(prev => prev.filter(p => p.id !== id));
     } else {
-      alert(`Delete Error: ${error.message}`);
+      alert(`Erreur de suppression: ${error.message}`);
     }
   };
 
@@ -265,7 +262,7 @@ export default function App() {
         try {
           fileToUpload = await compressImage(imageFile, 800, 800, 0.75);
         } catch (compressionError) {
-          console.warn("Failed to compress image, attempting original upload:", compressionError);
+          console.warn("Échec de la compression d'image, tentative d'envoi de l'original:", compressionError);
         }
 
         const cleanName = fileToUpload.name.replace(/[^a-zA-Z0-9.]/g, '_');
@@ -303,10 +300,10 @@ export default function App() {
       setImageFile(null);
       
       await fetchProducts();
-      alert('Product published successfully!');
+      alert('Produit publié avec succès !');
     } catch (err) {
       console.error(err);
-      alert(`Upload/Database Error: ${err.message}`);
+      alert(`Erreur d'importation/base de données: ${err.message}`);
     } finally {
       setUploading(false);
     }
@@ -325,7 +322,7 @@ export default function App() {
         try {
           fileToUpload = await compressImage(imageFile, 800, 800, 0.75);
         } catch (compressionError) {
-          console.warn("Failed to compress image, using original:", compressionError);
+          console.warn("Échec de la compression d'image, utilisation de l'original:", compressionError);
         }
 
         const cleanName = fileToUpload.name.replace(/[^a-zA-Z0-9.]/g, '_');
@@ -362,10 +359,10 @@ export default function App() {
 
       cancelEdit();
       await fetchProducts();
-      alert('Product updated successfully!');
+      alert('Produit mis à jour avec succès !');
     } catch (err) {
       console.error(err);
-      alert(`Update Error: ${err.message}`);
+      alert(`Erreur de mise à jour: ${err.message}`);
     } finally {
       setUploading(false);
     }
@@ -386,42 +383,40 @@ export default function App() {
       <header className="bg-white text-black sticky top-0 z-40 shadow-sm border-b border-gray-100 px-4 py-3">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           
-         {/* NEW MODERN LUXURY LOGO */}
-<div 
-  className="flex items-center space-x-2.5 cursor-pointer shrink-0 group select-none" 
-  onClick={() => { cancelEdit(); setView('client'); setSearchTerm(''); }}
->
-  {/* Custom Luxury DC Emblem Icon */}
-  <div className="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600 rounded-xl flex items-center justify-center shadow-md group-hover:scale-105 transition-transform duration-200 p-1.5">
-    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full text-white">
-      {/* Interlocking Monogram/Crown Shape */}
-      <path 
-        d="M30 25 C30 25, 45 15, 50 15 C55 15, 70 25, 70 25 C70 45, 60 75, 50 85 C40 75, 30 45, 30 25 Z" 
-        stroke="currentColor" 
-        strokeWidth="6" 
-        strokeLinecap="round" 
-        strokeLinejoin="round"
-      />
-      <circle cx="50" cy="42" r="7" fill="currentColor" />
-      <path 
-        d="M40 60 C45 65, 55 65, 60 60" 
-        stroke="currentColor" 
-        strokeWidth="6" 
-        strokeLinecap="round" 
-      />
-    </svg>
-  </div>
+          {/* NEW MODERN LUXURY LOGO */}
+          <div 
+            className="flex items-center space-x-2.5 cursor-pointer shrink-0 group select-none" 
+            onClick={() => { cancelEdit(); setView('client'); setSearchTerm(''); }}
+          >
+            <div className="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600 rounded-xl flex items-center justify-center shadow-md group-hover:scale-105 transition-transform duration-200 p-1.5">
+              <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full text-white">
+                <path 
+                  d="M30 25 C30 25, 45 15, 50 15 C55 15, 70 25, 70 25 C70 45, 60 75, 50 85 C40 75, 30 45, 30 25 Z" 
+                  stroke="currentColor" 
+                  strokeWidth="6" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round"
+                />
+                <circle cx="50" cy="42" r="7" fill="currentColor" />
+                <path 
+                  d="M40 60 C45 65, 55 65, 60 60" 
+                  stroke="currentColor" 
+                  strokeWidth="6" 
+                  strokeLinecap="round" 
+                />
+              </svg>
+            </div>
 
-  {/* Refined Brand Typography */}
-  <div className="flex flex-col justify-center">
-    <span className="font-black text-base sm:text-xl tracking-wider uppercase text-zinc-900 leading-none group-hover:text-amber-600 transition-colors">
-      DONCHIKE
-    </span>
-    <span className="text-[10px] sm:text-[11px] font-bold text-amber-500 tracking-[0.25em] uppercase leading-tight mt-0.5">
-      COSMETICS
-    </span>
-  </div>
-</div>
+            <div className="flex flex-col justify-center">
+              <span className="font-black text-base sm:text-xl tracking-wider uppercase text-zinc-900 leading-none group-hover:text-amber-600 transition-colors">
+                DONCHIKE
+              </span>
+              <span className="text-[10px] sm:text-[11px] font-bold text-amber-500 tracking-[0.25em] uppercase leading-tight mt-0.5">
+                COSMETICS
+              </span>
+            </div>
+          </div>
+
           {/* Action Area */}
           <div className="flex items-center space-x-2 sm:space-x-4 ml-auto">
             
@@ -432,7 +427,7 @@ export default function App() {
                 target="_blank" 
                 rel="noreferrer"
                 className="p-1.5 rounded-lg bg-green-50 hover:bg-green-100 text-green-600 transition-colors flex items-center justify-center"
-                title="Chat on WhatsApp"
+                title="Discuter sur WhatsApp"
               >
                 <Smartphone className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </a>
@@ -442,7 +437,7 @@ export default function App() {
                 target="_blank" 
                 rel="noreferrer"
                 className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold text-xs transition-colors w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center"
-                title="Follow on Facebook"
+                title="Suivre sur Facebook"
               >
                 f
               </a>
@@ -452,7 +447,7 @@ export default function App() {
                 target="_blank" 
                 rel="noreferrer"
                 className="p-1.5 rounded-lg bg-zinc-50 hover:bg-zinc-100 text-zinc-900 transition-colors flex items-center justify-center"
-                title="Follow on TikTok"
+                title="Suivre sur TikTok"
               >
                 <Video className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </a>
@@ -464,7 +459,7 @@ export default function App() {
               className="px-2 py-1.5 text-xs rounded-xl font-bold border border-gray-200 hover:bg-gray-50 text-gray-700 flex items-center space-x-1 shrink-0"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-[#f68b1e]" />
-              <span className="hidden md:inline">{view === 'client' ? 'Admin Portal' : 'Back to Shop'}</span>
+              <span className="hidden md:inline">{view === 'client' ? 'Espace Admin' : 'Retour à la boutique'}</span>
             </button>
 
             {/* Header Cart Button */}
@@ -493,15 +488,15 @@ export default function App() {
           <div className="bg-gradient-to-r from-zinc-950 via-zinc-900 to-amber-950 text-white rounded-2xl p-6 md:p-8 mb-6 border border-zinc-800 flex flex-col md:flex-row justify-between items-center">
             <div>
               <span className="bg-[#f68b1e]/10 text-[#f68b1e] text-[11px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-[#f68b1e]/20">
-                ✨ Best Store Experience
+                ✨ Meilleure Expérience d'Achat
               </span>
-              <h1 className="text-xl md:text-3xl font-black mt-2.5 tracking-tight">Don Chike Cosmetics Collection</h1>
-              <p className="text-zinc-400 text-xs mt-1">Sélectionnez vos articles et passez votre commande instantanément via WhatsApp..</p>
+              <h1 className="text-xl md:text-3xl font-black mt-2.5 tracking-tight">Collection Don Chike Cosmetics</h1>
+              <p className="text-zinc-400 text-xs mt-1">Sélectionnez vos articles et passez votre commande instantanément via WhatsApp.</p>
             </div>
             <div className="bg-white/5 px-4 py-2.5 rounded-xl border border-white/10 mt-4 md:mt-0">
-              <p className="text-[10px] text-zinc-400 uppercase tracking-wider">Fast Dispatch</p>
+              <p className="text-[10px] text-zinc-400 uppercase tracking-wider">Livraison Rapide</p>
               <p className="text-[#f68b1e] font-bold text-sm flex items-center justify-center space-x-1 mt-0.5">
-                <Smartphone className="w-3.5 h-3.5" /> <span>WhatsApp Checkout</span>
+                <Smartphone className="w-3.5 h-3.5" /> <span>Commande via WhatsApp</span>
               </p>
             </div>
           </div>
@@ -512,7 +507,7 @@ export default function App() {
               <Search className="w-4 h-4 text-gray-400 absolute left-3.5 pointer-events-none" />
               <input 
                 type="text" 
-                placeholder="Search for items, brands, cleansers..." 
+                placeholder="Rechercher un produit, une marque, un soin..." 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full bg-white text-sm text-black border border-gray-200 pl-10 pr-10 py-2.5 rounded-xl focus:outline-none focus:border-[#f68b1e] focus:ring-1 focus:ring-[#f68b1e] transition-all shadow-xs"
@@ -528,7 +523,7 @@ export default function App() {
             </div>
             {searchTerm && (
               <p className="text-[11px] text-gray-400 mt-1.5 ml-1">
-                Showing results for "<span className="text-zinc-700 font-medium">{searchTerm}</span>" ({filteredProducts.length} items found)
+                Résultats pour « <span className="text-zinc-700 font-medium">{searchTerm}</span> » ({filteredProducts.length} produits trouvés)
               </p>
             )}
           </div>
@@ -536,10 +531,10 @@ export default function App() {
           {/* SEARCH RESULTS LAYOUT TARGET */}
           {filteredProducts.length === 0 ? (
             <div className="bg-white rounded-2xl p-16 text-center border border-gray-100">
-              <p className="text-gray-400 text-sm">No cosmetics products match your search.</p>
+              <p className="text-gray-400 text-sm">Aucun produit ne correspond à votre recherche.</p>
               {searchTerm && (
                 <button onClick={() => setSearchTerm('')} className="mt-2 text-xs text-[#f68b1e] font-bold hover:underline">
-                  Clear search query
+                  Effacer la recherche
                 </button>
               )}
             </div>
@@ -561,13 +556,13 @@ export default function App() {
                       
                       <div className="absolute bottom-2 left-2 z-10">
                         <span className="bg-[#f68b1e] text-white font-bold text-[10px] px-2 py-0.5 rounded shadow-md">
-                          {p.quantity > 0 ? `${p.quantity} Items Left` : 'Out of Stock'}
+                          {p.quantity > 0 ? `${p.quantity} en stock` : 'Rupture de stock'}
                         </span>
                       </div>
 
                       {isOutOfStock && (
                         <div className="absolute inset-0 bg-white/80 backdrop-blur-[1px] flex items-center justify-center">
-                          <span className="bg-zinc-800 text-white font-bold text-[10px] uppercase tracking-widest px-2.5 py-1 rounded">SOLD OUT</span>
+                          <span className="bg-zinc-800 text-white font-bold text-[10px] uppercase tracking-widest px-2.5 py-1 rounded">ÉPUISÉ</span>
                         </div>
                       )}
                     </div>
@@ -578,7 +573,6 @@ export default function App() {
                           <span className="font-extrabold text-xs text-zinc-900 group-hover:text-[#f68b1e] transition-colors">DONCHIKE</span>
                           <span className="text-blue-500 text-[10px] font-bold">✔</span>
                         </div>
-                        {/* UPDATE: Name is now bolder and larger */}
                         <h3 className="text-sm md:text-base text-black line-clamp-2 min-h-[2.5rem] leading-tight font-extrabold">
                           {p.name} {p.description && <span className="font-normal text-gray-500 text-xs"> • {p.description}</span>}
                         </h3>
@@ -592,13 +586,13 @@ export default function App() {
                       </div>
                       
                       <div className="mt-3">
-                        {/* UPDATE: Price is now much larger and highly visible */}
-                        <p className="text-lg md:text-xl font-black text-[#f68b1e] tracking-tight mb-2">{p.price.toLocaleString()} CFA</p>
+                        {/* PRODUCT PRICE WITH "Prix: " PREFIX */}
+                        <p className="text-lg md:text-xl font-black text-[#f68b1e] tracking-tight mb-2">Prix: {p.price.toLocaleString()} FCFA</p>
 
                         <div className="mt-2.5">
                           {isOutOfStock ? (
                             <button disabled className="w-full bg-gray-100 text-gray-400 text-[11px] font-bold py-1.5 rounded-lg cursor-not-allowed">
-                              Out of Stock
+                              Rupture de stock
                             </button>
                           ) : itemQtyInCart > 0 ? (
                             <div className="flex items-center justify-between border border-[#f68b1e] rounded-lg overflow-hidden bg-white h-7 shadow-sm">
@@ -608,7 +602,7 @@ export default function App() {
                             </div>
                           ) : (
                             <button onClick={() => addToCart(p)} className="w-full bg-[#f68b1e] hover:bg-[#e07a16] text-white font-bold py-1.5 rounded-lg text-xs tracking-wide transition-all">
-                              Add to Cart
+                              Ajouter au panier
                             </button>
                           )}
                         </div>
@@ -630,13 +624,13 @@ export default function App() {
             /* SECURE SUPABASE AUTH LOGIN FORM */
             <div className="max-w-sm mx-auto bg-white rounded-2xl border border-gray-200 p-6 mt-10 shadow-sm">
               <div className="text-center mb-5">
-                <h2 className="text-lg font-bold text-gray-900">Admin Portal Login</h2>
-                <p className="text-xs text-gray-500 mt-1">Authenticate using your Supabase user credentials.</p>
+                <h2 className="text-lg font-bold text-gray-900">Connexion Admin</h2>
+                <p className="text-xs text-gray-500 mt-1">Connectez-vous avec vos identifiants Supabase.</p>
                 {authError && <p className="text-red-500 text-xs mt-2 font-medium bg-red-50 p-2 rounded-lg">{authError}</p>}
               </div>
               <form onSubmit={handleAdminLogin} className="space-y-4">
                 <div>
-                  <label className="text-[10px] font-bold uppercase text-gray-500 block mb-1">Email Address</label>
+                  <label className="text-[10px] font-bold uppercase text-gray-500 block mb-1">Adresse Email</label>
                   <input 
                     type="email" 
                     placeholder="admin@donchike.com" 
@@ -647,7 +641,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold uppercase text-gray-500 block mb-1">Password</label>
+                  <label className="text-[10px] font-bold uppercase text-gray-500 block mb-1">Mot de passe</label>
                   <input 
                     type="password" 
                     placeholder="••••••••" 
@@ -662,7 +656,7 @@ export default function App() {
                   disabled={authLoading}
                   className="w-full bg-zinc-950 hover:bg-zinc-800 text-white text-xs font-bold py-2.5 rounded-xl uppercase tracking-wider transition-all"
                 >
-                  {authLoading ? 'Authenticating...' : 'Sign In'}
+                  {authLoading ? 'Connexion en cours...' : 'Se connecter'}
                 </button>
               </form>
             </div>
@@ -671,7 +665,7 @@ export default function App() {
               {/* ADMIN HEADER TOOLBAR */}
               <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
                 <div>
-                  <p className="text-[10px] uppercase font-bold text-gray-400">Authenticated Session</p>
+                  <p className="text-[10px] uppercase font-bold text-gray-400">Session Authentifiée</p>
                   <p className="text-xs font-bold text-gray-800">{session.user.email}</p>
                 </div>
                 <button 
@@ -679,7 +673,7 @@ export default function App() {
                   className="px-3 py-1.5 text-xs font-bold bg-red-50 text-red-600 rounded-lg hover:bg-red-100 flex items-center space-x-1.5 transition-colors"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Log Out</span>
+                  <span>Déconnexion</span>
                 </button>
               </div>
 
@@ -689,14 +683,14 @@ export default function App() {
                 <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit">
                   <div className="flex justify-between items-center pb-2 border-b mb-4">
                     <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700">
-                      {editingProduct ? 'Update Cosmetics Product' : 'Add New Product'}
+                      {editingProduct ? 'Modifier le produit' : 'Ajouter un nouveau produit'}
                     </h3>
                     {editingProduct && (
                       <button 
                         onClick={cancelEdit} 
                         className="text-xs text-red-500 hover:text-red-700 font-bold hover:underline"
                       >
-                        Cancel Edit
+                        Annuler
                       </button>
                     )}
                   </div>
@@ -704,7 +698,7 @@ export default function App() {
                   <form onSubmit={editingProduct ? handleUpdateProduct : handleAddProduct} className="space-y-3.5">
                     <input 
                       type="text" 
-                      placeholder="Product Title" 
+                      placeholder="Nom du produit" 
                       value={name} 
                       onChange={e => setName(e.target.value)} 
                       className="w-full border p-2 text-xs rounded-lg bg-white text-black" 
@@ -713,7 +707,7 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-3">
                       <input 
                         type="number" 
-                        placeholder="Price (CFA)" 
+                        placeholder="Prix (FCFA)" 
                         value={price} 
                         onChange={e => setPrice(e.target.value)} 
                         className="w-full border p-2 text-xs rounded-lg bg-white text-black" 
@@ -721,7 +715,7 @@ export default function App() {
                       />
                       <input 
                         type="number" 
-                        placeholder="Stock Qty" 
+                        placeholder="Quantité en stock" 
                         value={quantity} 
                         onChange={e => setQuantity(e.target.value)} 
                         className="w-full border p-2 text-xs rounded-lg bg-white text-black" 
@@ -737,7 +731,7 @@ export default function App() {
                     
                     <div className="space-y-1">
                       <label className="text-[10px] text-gray-400 block font-bold uppercase">
-                        {editingProduct ? 'Change Product Image (Optional)' : 'Product Image'}
+                        {editingProduct ? 'Changer l\'image du produit (Optionnel)' : 'Image du produit'}
                       </label>
                       <input 
                         type="file" 
@@ -752,21 +746,21 @@ export default function App() {
                       disabled={uploading} 
                       className="w-full bg-[#f68b1e] text-white text-xs py-2 rounded-lg font-bold uppercase hover:bg-[#e07a16] transition-all"
                     >
-                      {uploading ? 'Processing...' : editingProduct ? 'Save Updates' : 'Publish Product'}
+                      {uploading ? 'Traitement en cours...' : editingProduct ? 'Enregistrer les modifications' : 'Publier le produit'}
                     </button>
                   </form>
                 </div>
 
                 {/* Operational Catalog Controller */}
                 <div className="md:col-span-2 bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                  <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 mb-4 pb-2 border-b">Operational Catalog Controller</h3>
+                  <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 mb-4 pb-2 border-b">Gestionnaire de Catalogue</h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead>
                         <tr className="bg-gray-50 text-gray-400 font-bold border-b">
-                          <th className="p-2.5">Item Info</th>
-                          <th className="p-2.5">Price</th>
-                          <th className="p-2.5 text-center">In-Stock Units</th>
+                          <th className="p-2.5">Article</th>
+                          <th className="p-2.5">Prix</th>
+                          <th className="p-2.5 text-center">En Stock</th>
                           <th className="p-2.5 text-center">Actions</th>
                         </tr>
                       </thead>
@@ -777,7 +771,7 @@ export default function App() {
                               <img src={p.image_url} alt="" className="w-8 h-8 object-cover rounded border" />
                               <span className="font-extrabold text-black line-clamp-1">{p.name}</span>
                             </td>
-                            <td className="p-2.5 font-bold text-gray-700">{p.price.toLocaleString()} CFA</td>
+                            <td className="p-2.5 font-bold text-gray-700">Prix: {p.price.toLocaleString()} FCFA</td>
                             <td className="p-2.5 text-center">
                               <input 
                                 type="number" 
@@ -791,14 +785,14 @@ export default function App() {
                                 <button 
                                   onClick={() => startEditProduct(p)} 
                                   className="text-gray-400 hover:text-green-600 transition-colors"
-                                  title="Edit Product Info"
+                                  title="Modifier le produit"
                                 >
                                   <Pencil className="w-4 h-4" />
                                 </button>
                                 <button 
                                   onClick={() => handleDeleteProduct(p.id)} 
                                   className="text-gray-400 hover:text-red-600 transition-colors"
-                                  title="Delete Product"
+                                  title="Supprimer le produit"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
@@ -836,11 +830,11 @@ export default function App() {
           <div className="w-full max-w-sm bg-white h-full p-5 flex flex-col justify-between shadow-xl">
             <div>
               <div className="flex justify-between items-center border-b pb-3 mb-4">
-                <h3 className="font-bold text-gray-900 uppercase text-xs">Your Bag ({cartCount})</h3>
+                <h3 className="font-bold text-gray-900 uppercase text-xs">Votre Panier ({cartCount})</h3>
                 <button onClick={() => setIsCartOpen(false)} className="text-gray-400 text-xl font-light">&times;</button>
               </div>
               {cart.length === 0 ? (
-                <p className="text-center text-gray-400 text-xs py-10">Your cart is empty.</p>
+                <p className="text-center text-gray-400 text-xs py-10">Votre panier est vide.</p>
               ) : (
                 <div className="space-y-3 overflow-y-auto max-h-[75vh]">
                   {cart.map(item => (
@@ -849,7 +843,7 @@ export default function App() {
                         <img src={item.image_url} alt="" className="w-10 h-10 object-cover rounded bg-white border" />
                         <div>
                           <h4 className="text-sm font-extrabold text-black line-clamp-1">{item.name}</h4>
-                          <p className="text-sm font-black text-[#f68b1e]">{item.price.toLocaleString()} CFA</p>
+                          <p className="text-sm font-black text-[#f68b1e]">Prix: {item.price.toLocaleString()} FCFA</p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-1.5 bg-white border rounded p-0.5">
@@ -866,10 +860,10 @@ export default function App() {
               <div className="border-t pt-3">
                 <div className="flex justify-between items-baseline font-bold mb-3">
                   <span className="text-gray-400 text-xs uppercase">Total:</span>
-                  <span className="text-lg font-black text-black">{cartTotal.toLocaleString()} CFA</span>
+                  <span className="text-lg font-black text-black">Prix: {cartTotal.toLocaleString()} FCFA</span>
                 </div>
                 <button onClick={handleWhatsAppCheckout} className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl font-bold text-xs uppercase text-center block">
-                  Order via WhatsApp
+                  Commander sur WhatsApp
                 </button>
               </div>
             )}
