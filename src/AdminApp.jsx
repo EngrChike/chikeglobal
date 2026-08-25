@@ -24,16 +24,8 @@ export default function AdminApp() {
   const [uploading, setUploading] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
 
-  // Customer Ledger & Multi-Item Cart (Holder) states
-  const [customers, setCustomers] = useState([
-    { 
-      id: 1, 
-      name: 'Mr. Obi', 
-      phone: '+225 07000000', 
-      totalDebt: 15000, 
-      history: [{ date: '2026-08-20', batch: 'Batch A', productId: null, qty: 10, goods: '10 Cartons Lotion', total: 50000, paid: 35000 }] 
-    }
-  ]);
+  // Customer Ledger & Multi-Item Cart (Holder) states - Initialized empty as requested
+  const [customers, setCustomers] = useState([]);
   const [ledgerForm, setLedgerForm] = useState({ 
     customerId: '', 
     newName: '', 
@@ -711,6 +703,11 @@ export default function AdminApp() {
                       </div>
                     </div>
                   ))}
+                  {customers.length === 0 && (
+                    <div className="col-span-full text-center py-12 text-gray-400 text-xs bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                      Aucun client enregistré pour le moment. Utilisez le formulaire à gauche pour enregistrer votre premier client ou effectuer une vente.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
