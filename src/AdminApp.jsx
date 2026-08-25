@@ -312,7 +312,7 @@ export default function AdminApp() {
               <Users className="w-4 h-4" /> <span>Customer Ledger</span>
             </button>
             <button onClick={() => setActiveTab('storefront')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'storefront' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
-              <Eye className="w-4 h-4" /> <span>Front-Page Preview (Stock >= 1)</span>
+              <Eye className="w-4 h-4" /> <span>Front-Page Preview (Stock &gt;= 1)</span>
             </button>
           </div>
           <button onClick={handleAdminLogout} className="w-full sm:w-auto px-3 py-1.5 text-xs font-bold bg-red-50 text-red-600 rounded-lg hover:bg-red-100 flex items-center justify-center space-x-1.5">
@@ -594,7 +594,7 @@ export default function AdminApp() {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b gap-2">
               <div>
                 <h3 className="font-black text-sm uppercase tracking-wide text-gray-900">Aperçu Front-Page (Catalogue Public)</h3>
-                <p className="text-xs text-gray-500 mt-0.5">Seuls les articles avec au moins 1 produit en stock (quantité $\ge$ 1) sont affichés ici.</p>
+                <p className="text-xs text-gray-500 mt-0.5">Seuls les articles avec au moins 1 produit en stock (quantité &gt;= 1) sont affichés ici.</p>
               </div>
               <span className="bg-green-100 text-green-800 text-xs font-bold px-3 py-1 rounded-full">
                 {frontPageProducts.length} articles visibles sur la boutique
