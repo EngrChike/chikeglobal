@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './utils/supabaseClient';
-import { ShieldCheck, Trash2, Pencil, LogOut, Users, Package, Phone, CheckCircle, X, DollarSign, TrendingUp, Layers } from 'lucide-react';
+import { ShieldCheck, Trash2, Pencil, LogOut, Users, Package, Phone, CheckCircle, X, DollarSign, TrendingUp, Layers, Eye } from 'lucide-react';
 
 export default function AdminApp() {
   const [session, setSession] = useState(null);
@@ -9,7 +9,7 @@ export default function AdminApp() {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
-  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' or 'customers'
+  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory', 'customers', or 'storefront'
   const [products, setProducts] = useState([]);
   const [selectedBatchFilter, setSelectedBatchFilter] = useState('ALL');
 
@@ -262,6 +262,9 @@ export default function AdminApp() {
     ? products 
     : products.filter(p => p.batch_reference === selectedBatchFilter);
 
+  // FRONT-PAGE CATALOG FILTER: Only show products with quantity >= 1 (Hides 0 quantity items)
+  const frontPageProducts = products.filter(p => (p.quantity || 0) >= 1);
+
   // Live calculation preview for sale form
   const selectedProdForSale = products.find(p => p.id === ledgerForm.selectedProductId);
   const previewUnitPrice = selectedProdForSale ? selectedProdForSale.price : 0;
@@ -307,6 +310,9 @@ export default function AdminApp() {
             </button>
             <button onClick={() => setActiveTab('customers')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'customers' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
               <Users className="w-4 h-4" /> <span>Customer Ledger</span>
+            </button>
+            <button onClick={() => setActiveTab('storefront')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'storefront' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
+              <Eye className="w-4 h-4" /> <span>Front-Page Preview (Stock >= 1)</span>
             </button>
           </div>
           <button onClick={handleAdminLogout} className="w-full sm:w-auto px-3 py-1.5 text-xs font-bold bg-red-50 text-red-600 rounded-lg hover:bg-red-100 flex items-center justify-center space-x-1.5">
@@ -581,6 +587,48 @@ export default function AdminApp() {
 
           </div>
         )}
+
+        {/* TAB 3: FRONT-PAGE STOREFRONT PREVIEW (Only displays products with quantity >= 1) */}
+        {activeTab === 'storefront' && (
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b gap-2">
+              <div>
+                <h3 className="font-black text-sm uppercase tracking-wide text-gray-900">Aperçu Front-Page (Catalogue Public)</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Seuls les articles avec au moins 1 produit en stock (quantité $\ge$ 1) sont affichés ici.</p>
+              </div>
+              <span className="bg-green-100 text-green-800 text-xs font-bold px-3 py-1 rounded-full">
+                {frontPageProducts.length} articles visibles sur la boutique
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {frontPageProducts.map(p => (
+                <div key={p.id} className="border border-gray-200 rounded-xl p-4 bg-white flex flex-col justify-between shadow-xs hover:shadow-md transition-shadow">
+                  <div>
+                    <img src={p.image_url} alt={p.name} className="w-full h-40 object-cover rounded-lg border mb-3" />
+                    <span className="bg-orange-100 text-orange-800 font-bold px-2 py-0.5 rounded text-[10px] inline-block mb-1">
+                      {p.batch_reference || 'BATCH'}
+                    </span>
+                    <h4 className="font-black text-sm text-gray-900 leading-tight">{p.name}</h4>
+                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">{p.description || 'Aucune description disponible.'}</p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-gray-100 flex justify-between items-center">
+                    <span className="font-black text-orange-600 text-sm">{p.price?.toLocaleString()} FCFA</span>
+                    <span className="text-[11px] font-bold text-green-600 bg-green-50 px-2 py-1 rounded">
+                      Stock: {p.quantity} pcs
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {frontPageProducts.length === 0 && (
+                <div className="col-span-full text-center py-12 text-gray-400 text-xs">
+                  Aucun produit en stock pour le moment (tous les articles ont une quantité de 0).
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
