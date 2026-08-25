@@ -1,21 +1,23 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
 import ClientApp from './ClientApp';
 import AdminApp from './AdminApp';
 
 export default function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        {/* The public storefront for your customers */}
-        <Route path="/" element={<ClientApp />} />
-        
-        {/* The secure dashboard for you to manage inventory and debts */}
-        <Route path="/admin" element={<AdminApp />} />
+  // Check initial hash on load (e.g., if user visits /#admin directly)
+  const [isAdminRoute, setIsAdminRoute] = useState(window.location.hash === '#admin');
 
-        {/* Catch-all: Redirects any unknown URLs back to the storefront */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
-  );
+  useEffect(() => {
+    // Listen for hash changes in the URL (triggered by the lock icon or manual typing)
+    const handleHashChange = () => {
+      setIsAdminRoute(window.location.hash === '#admin');
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    
+    // Cleanup listener on component unmount
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  // Render Admin Dashboard if hash is #admin, otherwise render the Customer Storefront
+  return isAdminRoute ? <AdminApp /> : <ClientApp />;
 }
