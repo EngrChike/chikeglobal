@@ -24,7 +24,7 @@ export default function AdminApp() {
   const [uploading, setUploading] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
 
-  // Customer Ledger states
+  // Customer Ledger & Multi-Item Cart (Holder) states
   const [customers, setCustomers] = useState([
     { 
       id: 1, 
@@ -38,11 +38,14 @@ export default function AdminApp() {
     customerId: '', 
     newName: '', 
     newPhone: '', 
-    selectedProductId: '', 
-    saleQuantity: '1', 
-    customGoodsName: '',
     initialPaid: '' 
   });
+  
+  // Cart Holder States for Multiple Goods Selection
+  const [cartItems, setCartItems] = useState([]);
+  const [cartProductId, setCartProductId] = useState('');
+  const [cartQty, setCartQty] = useState('1');
+
   const [paymentForm, setPaymentForm] = useState({ amount: '', customerId: null });
   const [editingCustomer, setEditingCustomer] = useState(null);
 
@@ -173,41 +176,89 @@ export default function AdminApp() {
     if (!error) setProducts(prev => prev.filter(p => p.id !== id));
   };
 
-  // CUSTOMER LEDGER FUNCTIONS (Using Inventory Picker)
-  const handleRecordSale = (e) => {
+  // --- CART / HOLDER FUNCTIONS ---
+  const handleAddToCart = () => {
+    if (!cartProductId) return;
+    const prod = products.find(p => p.id === parseInt(cartProductId) || p.id === cartProductId);
+    if (!prod) return;
+    const qty = parseInt(cartQty) || 1;
+
+    // Check if product is already in cart
+    const existingIndex = cartItems.findIndex(item => item.productId === prod.id);
+    if (existingIndex > -1) {
+      const updated = [...cartItems];
+      updated[existingIndex].qty += qty;
+      setCartItems(updated);
+    } else {
+      setCartItems([...cartItems, {
+        productId: prod.id,
+        name: prod.name,
+        batch: prod.batch_reference || 'N/A',
+        price: prod.price,
+        qty: qty
+      }]);
+    }
+    setCartProductId('');
+    setCartQty('1');
+  };
+
+  const handleRemoveFromCart = (index) => {
+    setCartItems(cartItems.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateCartItemQty = (index, newQty) => {
+    const qty = parseInt(newQty) || 0;
+    const updated = [...cartItems];
+    updated[index].qty = qty;
+    setCartItems(updated);
+  };
+
+  const handleUpdateCartItemPrice = (index, newPrice) => {
+    const price = parseFloat(newPrice) || 0;
+    const updated = [...cartItems];
+    updated[index].price = price;
+    setCartItems(updated);
+  };
+
+  const cartTotal = cartItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
+
+  // FINALIZING MULTI-ITEM SALE
+  const handleFinalizeSale = async (e) => {
     e.preventDefault();
-    const selectedProd = products.find(p => p.id === ledgerForm.selectedProductId);
-    const saleQty = parseInt(ledgerForm.saleQuantity) || 1;
-
-    let goodsDescription = ledgerForm.customGoodsName;
-    let unitPrice = 0;
-    let batchRef = 'N/A';
-    let prodId = null;
-
-    if (selectedProd) {
-      goodsDescription = `${saleQty}x ${selectedProd.name}`;
-      unitPrice = selectedProd.price;
-      batchRef = selectedProd.batch_reference;
-      prodId = selectedProd.id;
-
-      // Automatically deduct stock from Supabase inventory
-      const newStock = Math.max(0, selectedProd.quantity - saleQty);
-      handleUpdateStockVolume(selectedProd.id, newStock);
+    if (cartItems.length === 0) {
+      alert("Veuillez ajouter au moins un article au panier.");
+      return;
+    }
+    if (!ledgerForm.customerId) {
+      alert("Veuillez sélectionner un client.");
+      return;
     }
 
-    const tCost = unitPrice * saleQty;
     const iPaid = parseFloat(ledgerForm.initialPaid) || 0;
-    const balance = tCost - iPaid;
-    
+    const balance = cartTotal - iPaid;
+    const goodsDescription = cartItems.map(item => `${item.qty}x ${item.name} (${item.batch})`).join(', ');
+
     const newTransaction = {
       date: new Date().toISOString().split('T')[0],
-      batch: batchRef,
-      productId: prodId,
-      qty: saleQty,
+      batch: cartItems.length === 1 ? cartItems[0].batch : 'MULTI-BATCH',
+      productId: cartItems.length === 1 ? cartItems[0].productId : null,
+      qty: cartItems.reduce((sum, item) => sum + item.qty, 0),
       goods: goodsDescription,
-      total: tCost,
-      paid: iPaid
+      total: cartTotal,
+      paid: iPaid,
+      items: cartItems
     };
+
+    // Deduct stock automatically from Supabase for all items in cart
+    for (const item of cartItems) {
+      if (item.productId) {
+        const selectedProd = products.find(p => p.id === item.productId);
+        if (selectedProd) {
+          const newStock = Math.max(0, selectedProd.quantity - item.qty);
+          await handleUpdateStockVolume(selectedProd.id, newStock);
+        }
+      }
+    }
 
     if (ledgerForm.customerId === 'new') {
       const newCustomer = {
@@ -225,8 +276,11 @@ export default function AdminApp() {
         : c
       ));
     }
-    setLedgerForm({ customerId: '', newName: '', newPhone: '', selectedProductId: '', saleQuantity: '1', customGoodsName: '', initialPaid: '' });
-    alert('Vente enregistrée et stock réduit automatiquement avec succès !');
+
+    // Reset Form & Cart
+    setLedgerForm({ customerId: '', newName: '', newPhone: '', initialPaid: '' });
+    setCartItems([]);
+    alert('Vente enregistrée avec succès, calcul effectué et stocks réduits !');
   };
 
   const handleRecordPayment = (e) => {
@@ -268,14 +322,12 @@ export default function AdminApp() {
   };
 
   // FINANCIAL CALCULATIONS
-  // 1. Total Capital Investi (Total Purchase Amount) - Remains constant even when stock is sold/reduced
   const totalInventoryCost = products.reduce((acc, p) => {
     const soldQty = getProductSoldQty(p.id, p.name);
     const initialQty = (parseInt(p.quantity) || 0) + soldQty;
     return acc + ((parseFloat(p.cost_price) || 0) * initialQty);
   }, 0);
 
-  // 2. Cost of Goods Sold (Total cost value of items sold)
   const totalGoodsSoldCost = products.reduce((acc, p) => {
     const soldQty = getProductSoldQty(p.id, p.name);
     return acc + ((parseFloat(p.cost_price) || 0) * soldQty);
@@ -292,16 +344,7 @@ export default function AdminApp() {
     ? products 
     : products.filter(p => p.batch_reference === selectedBatchFilter);
 
-  // FRONT-PAGE CATALOG FILTER: Only show products with quantity >= 1 (Hides 0 quantity items)
   const frontPageProducts = products.filter(p => (p.quantity || 0) >= 1);
-
-  // Live calculation preview for sale form
-  const selectedProdForSale = products.find(p => p.id === ledgerForm.selectedProductId);
-  const previewUnitPrice = selectedProdForSale ? selectedProdForSale.price : 0;
-  const previewQty = parseInt(ledgerForm.saleQuantity) || 1;
-  const previewTotal = previewUnitPrice * previewQty;
-  const previewPaid = parseFloat(ledgerForm.initialPaid) || 0;
-  const previewBalanceDue = previewTotal - previewPaid;
 
   if (!session) {
     return (
@@ -339,7 +382,7 @@ export default function AdminApp() {
               <Package className="w-4 h-4" /> <span>Inventory & Batches</span>
             </button>
             <button onClick={() => setActiveTab('customers')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'customers' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
-              <Users className="w-4 h-4" /> <span>Customer Ledger</span>
+              <Users className="w-4 h-4" /> <span>Customer Ledger & Cart</span>
             </button>
             <button onClick={() => setActiveTab('storefront')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'storefront' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
               <Eye className="w-4 h-4" /> <span>Front-Page Preview (Stock &gt;= 1)</span>
@@ -479,14 +522,15 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* TAB 2: CUSTOMER LEDGER */}
+        {/* TAB 2: CUSTOMER LEDGER WITH MULTI-ITEM CART (HOLDER) */}
         {activeTab === 'customers' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
-            {/* RECORD NEW SALE USING INVENTORY PICKER */}
-            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit">
-              <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 mb-4 pb-2 border-b">Enregistrer une Vente (Stock Picker)</h3>
-              <form onSubmit={handleRecordSale} className="space-y-3.5">
+            {/* RECORD NEW SALE WITH CART / HOLDER */}
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit space-y-4">
+              <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 pb-2 border-b">Enregistrer une Vente (Panier Multi-Articles)</h3>
+              
+              <form onSubmit={handleFinalizeSale} className="space-y-4">
                 <div>
                   <label className="text-[10px] text-gray-400 font-bold block mb-1">Sélectionner le Client</label>
                   <select value={ledgerForm.customerId} onChange={e => setLedgerForm({...ledgerForm, customerId: e.target.value})} className="w-full border p-2.5 text-xs rounded-lg" required>
@@ -502,53 +546,105 @@ export default function AdminApp() {
                     <input type="text" placeholder="Numéro de Téléphone (+225...)" value={ledgerForm.newPhone} onChange={e => setLedgerForm({...ledgerForm, newPhone: e.target.value})} className="w-full border p-2 text-xs rounded-lg bg-white" required />
                   </div>
                 )}
-                
+
+                {/* HOLDER / CART BUILDER */}
+                <div className="bg-gray-50 p-3.5 rounded-xl border space-y-3">
+                  <label className="text-[10px] text-gray-500 font-bold uppercase block">Ajouter des articles au panier</label>
+                  <div className="grid grid-cols-1 gap-2">
+                    <select value={cartProductId} onChange={e => setCartProductId(e.target.value)} className="w-full border p-2 text-xs rounded-lg bg-white">
+                      <option value="">-- Choisir un produit de l'inventaire --</option>
+                      {products.map(p => (
+                        <option key={p.id} value={p.id}>
+                          [{p.batch_reference || 'N/A'}] {p.name} - {p.price?.toLocaleString()} FCFA (Stock: {p.quantity})
+                        </option>
+                      ))}
+                    </select>
+                    <div className="flex space-x-2">
+                      <input type="number" min="1" placeholder="Qté" value={cartQty} onChange={e => setCartQty(e.target.value)} className="w-20 border p-2 text-xs rounded-lg bg-white text-center font-bold" />
+                      <button type="button" onClick={handleAddToCart} className="flex-1 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold py-2 px-3 rounded-lg uppercase tracking-wider">
+                        + Ajouter au panier
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* CART ITEMS TABLE (Editable quantities, editable prices, removable) */}
+                  {cartItems.length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                      <div className="bg-white rounded-lg border overflow-hidden">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-gray-100 text-gray-500 font-bold border-b">
+                            <tr>
+                              <th className="p-2">Article</th>
+                              <th className="p-2 text-center">Qté</th>
+                              <th className="p-2 text-right">Prix Unitaire</th>
+                              <th className="p-2 text-center">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {cartItems.map((item, index) => (
+                              <tr key={index} className="hover:bg-gray-50">
+                                <td className="p-2 font-bold">
+                                  {item.name} <span className="text-[9px] text-orange-600 block">({item.batch})</span>
+                                </td>
+                                <td className="p-2 text-center">
+                                  <input 
+                                    type="number" 
+                                    min="1" 
+                                    value={item.qty} 
+                                    onChange={(e) => handleUpdateCartItemQty(index, e.target.value)} 
+                                    className="w-14 border text-center p-1 rounded font-bold text-xs" 
+                                  />
+                                </td>
+                                <td className="p-2 text-right">
+                                  <input 
+                                    type="number" 
+                                    value={item.price} 
+                                    onChange={(e) => handleUpdateCartItemPrice(index, e.target.value)} 
+                                    className="w-24 border text-right p-1 rounded font-bold text-xs" 
+                                  />
+                                </td>
+                                <td className="p-2 text-center">
+                                  <button type="button" onClick={() => handleRemoveFromCart(index)} className="text-red-500 hover:text-red-700 p-1" title="Supprimer">
+                                    <Trash2 className="w-4 h-4 inline" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-center text-[11px] text-gray-400 italic py-2">Le panier est actuellement vide.</p>
+                  )}
+                </div>
+
                 <div>
-                  <label className="text-[10px] text-gray-400 font-bold block mb-1">Sélectionner l'Article en Stock (Batch Distinct)</label>
-                  <select value={ledgerForm.selectedProductId} onChange={e => setLedgerForm({...ledgerForm, selectedProductId: e.target.value})} className="w-full border p-2.5 text-xs rounded-lg" required>
-                    <option value="">-- Choisir depuis l'Inventaire --</option>
-                    {products.map(p => (
-                      <option key={p.id} value={p.id}>
-                        [{p.batch_reference || 'N/A'}] {p.name} - {p.price?.toLocaleString()} FCFA (Stock: {p.quantity})
-                      </option>
-                    ))}
-                  </select>
+                  <label className="text-[10px] text-gray-400 font-bold block mb-1">Montant Payé Initial (FCFA)</label>
+                  <input type="number" placeholder="Payé mtn" value={ledgerForm.initialPaid} onChange={e => setLedgerForm({...ledgerForm, initialPaid: e.target.value})} className="w-full border p-2.5 text-xs rounded-lg" required />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold block mb-1">Quantité Vendue</label>
-                    <input type="number" min="1" placeholder="Qté" value={ledgerForm.saleQuantity} onChange={e => setLedgerForm({...ledgerForm, saleQuantity: e.target.value})} className="w-full border p-2.5 text-xs rounded-lg" required />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold block mb-1">Montant Payé Initial (FCFA)</label>
-                    <input type="number" placeholder="Payé mtn" value={ledgerForm.initialPaid} onChange={e => setLedgerForm({...ledgerForm, initialPaid: e.target.value})} className="w-full border p-2.5 text-xs rounded-lg" required />
-                  </div>
-                </div>
-
-                {/* LIVE PREVIEW TOTAL */}
-                {ledgerForm.selectedProductId !== '' && (
+                {/* LIVE CALCULATION DISPLAY */}
+                {cartItems.length > 0 && (
                   <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-xs space-y-1">
                     <div className="flex justify-between text-gray-600">
-                      <span>Prix Unitaire:</span>
-                      <span className="font-bold">{previewUnitPrice.toLocaleString()} FCFA</span>
-                    </div>
-                    <div className="flex justify-between text-gray-600">
-                      <span>Total Vente ({previewQty} pcs):</span>
-                      <span className="font-bold">{previewTotal.toLocaleString()} FCFA</span>
+                      <span>Total Panier:</span>
+                      <span className="font-bold">{cartTotal.toLocaleString()} FCFA</span>
                     </div>
                     <div className="flex justify-between text-gray-600">
                       <span>Montant Payé:</span>
-                      <span className="font-bold text-green-600">{previewPaid.toLocaleString()} FCFA</span>
+                      <span className="font-bold text-green-600">{(parseFloat(ledgerForm.initialPaid) || 0).toLocaleString()} FCFA</span>
                     </div>
                     <div className="flex justify-between border-t border-orange-200 pt-1 text-orange-900 font-extrabold">
                       <span>Ajouté à la Dette:</span>
-                      <span>{previewBalanceDue > 0 ? `${previewBalanceDue.toLocaleString()} FCFA` : '0 FCFA (Soldé)'}</span>
+                      <span>{Math.max(0, cartTotal - (parseFloat(ledgerForm.initialPaid) || 0)).toLocaleString()} FCFA</span>
                     </div>
                   </div>
                 )}
                 
-                <button type="submit" className="w-full bg-black text-white text-xs py-3 rounded-lg font-bold uppercase tracking-wider">Enregistrer la Vente & Déduire Stock</button>
+                <button type="submit" disabled={cartItems.length === 0} className="w-full bg-black hover:bg-gray-800 disabled:bg-gray-300 text-white text-xs py-3 rounded-lg font-bold uppercase tracking-wider">
+                  Terminer & Enregistrer la Vente
+                </button>
               </form>
             </div>
 
@@ -622,7 +718,7 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* TAB 3: FRONT-PAGE STOREFRONT PREVIEW (Only displays products with quantity >= 1) */}
+        {/* TAB 3: FRONT-PAGE STOREFRONT PREVIEW */}
         {activeTab === 'storefront' && (
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b gap-2">
