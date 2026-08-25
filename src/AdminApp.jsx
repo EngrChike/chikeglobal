@@ -31,7 +31,7 @@ export default function AdminApp() {
       name: 'Mr. Obi', 
       phone: '+225 07000000', 
       totalDebt: 15000, 
-      history: [{ date: '2026-08-20', batch: 'Batch A', goods: '10 Cartons Lotion', total: 50000, paid: 35000 }] 
+      history: [{ date: '2026-08-20', batch: 'Batch A', productId: null, qty: 10, goods: '10 Cartons Lotion', total: 50000, paid: 35000 }] 
     }
   ]);
   const [ledgerForm, setLedgerForm] = useState({ 
@@ -182,11 +182,13 @@ export default function AdminApp() {
     let goodsDescription = ledgerForm.customGoodsName;
     let unitPrice = 0;
     let batchRef = 'N/A';
+    let prodId = null;
 
     if (selectedProd) {
       goodsDescription = `${saleQty}x ${selectedProd.name}`;
       unitPrice = selectedProd.price;
       batchRef = selectedProd.batch_reference;
+      prodId = selectedProd.id;
 
       // Automatically deduct stock from Supabase inventory
       const newStock = Math.max(0, selectedProd.quantity - saleQty);
@@ -200,6 +202,8 @@ export default function AdminApp() {
     const newTransaction = {
       date: new Date().toISOString().split('T')[0],
       batch: batchRef,
+      productId: prodId,
+      qty: saleQty,
       goods: goodsDescription,
       total: tCost,
       paid: iPaid
@@ -222,7 +226,7 @@ export default function AdminApp() {
       ));
     }
     setLedgerForm({ customerId: '', newName: '', newPhone: '', selectedProductId: '', saleQuantity: '1', customGoodsName: '', initialPaid: '' });
-    alert('Vente enregistrée et stock mis à jour avec succès !');
+    alert('Vente enregistrée et stock réduit automatiquement avec succès !');
   };
 
   const handleRecordPayment = (e) => {
@@ -249,8 +253,34 @@ export default function AdminApp() {
     alert('Informations client mises à jour !');
   };
 
+  // HELPER TO CALCULATE TOTAL SOLD QUANTITY FOR A PRODUCT
+  const getProductSoldQty = (productId, productName) => {
+    return customers.reduce((acc, c) => {
+      return acc + c.history.reduce((hAcc, h) => {
+        const matchesId = h.productId && h.productId === productId;
+        const matchesName = h.goods && h.goods.toLowerCase().includes(productName?.toLowerCase());
+        if (matchesId || matchesName) {
+          return hAcc + (h.qty || 1);
+        }
+        return hAcc;
+      }, 0);
+    }, 0);
+  };
+
   // FINANCIAL CALCULATIONS
-  const totalInventoryCost = products.reduce((acc, p) => acc + ((parseFloat(p.cost_price) || 0) * (parseInt(p.quantity) || 0)), 0);
+  // 1. Total Capital Investi (Total Purchase Amount) - Remains constant even when stock is sold/reduced
+  const totalInventoryCost = products.reduce((acc, p) => {
+    const soldQty = getProductSoldQty(p.id, p.name);
+    const initialQty = (parseInt(p.quantity) || 0) + soldQty;
+    return acc + ((parseFloat(p.cost_price) || 0) * initialQty);
+  }, 0);
+
+  // 2. Cost of Goods Sold (Total cost value of items sold)
+  const totalGoodsSoldCost = products.reduce((acc, p) => {
+    const soldQty = getProductSoldQty(p.id, p.name);
+    return acc + ((parseFloat(p.cost_price) || 0) * soldQty);
+  }, 0);
+
   const totalPotentialRetail = products.reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
   const totalSalesRevenue = customers.reduce((acc, c) => acc + c.history.reduce((hAcc, h) => hAcc + (h.total || 0), 0), 0);
   const totalCashCollected = customers.reduce((acc, c) => acc + c.history.reduce((hAcc, h) => hAcc + (h.paid || 0), 0), 0);
@@ -321,9 +351,9 @@ export default function AdminApp() {
         </div>
 
         {/* FINANCIAL METRICS DASHBOARD OVERVIEW */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Capital Investi (Cost)</p>
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Capital Investi (Achats)</p>
             <p className="text-base sm:text-xl font-black text-gray-900 mt-1">{totalInventoryCost.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
@@ -331,10 +361,14 @@ export default function AdminApp() {
             <p className="text-base sm:text-xl font-black text-orange-600 mt-1">{totalPotentialRetail.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Coût Marchandises Vendues</p>
+            <p className="text-base sm:text-xl font-black text-purple-600 mt-1">{totalGoodsSoldCost.toLocaleString()} FCFA</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
             <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Ventes (Revenue)</p>
             <p className="text-base sm:text-xl font-black text-blue-600 mt-1">{totalSalesRevenue.toLocaleString()} FCFA</p>
           </div>
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs col-span-2 lg:col-span-1">
             <p className="text-[10px] font-extrabold uppercase text-gray-400">Dettes Clients Restantes</p>
             <p className="text-base sm:text-xl font-black text-red-600 mt-1">{totalOutstandingDebt.toLocaleString()} FCFA</p>
           </div>
