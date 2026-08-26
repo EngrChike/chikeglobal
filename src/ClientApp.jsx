@@ -19,10 +19,14 @@ export default function ClientApp() {
 
   const fetchProducts = async () => {
     try {
+      // Exclude archived items and items with 0 stock from the client storefront
       const { data, error } = await supabase
         .from('products')
         .select('*')
+        .eq('is_archived', false)
+        .gt('quantity', 0)
         .order('created_at', { ascending: false });
+      
       if (!error && data) setProducts(data);
     } catch (err) {
       console.error("Erreur de récupération: ", err);
@@ -70,7 +74,7 @@ export default function ClientApp() {
     if (cart.length === 0) return;
     let msg = '✨ *DONCHIKE COSMETICS - NOUVELLE COMMANDE* ✨\n------------------------------------------\n\n';
     cart.forEach((item, idx) => {
-      msg += `🛍️ *${idx + 1}. ${item.name}*\n   Prix: ${item.price.toLocaleString()} FCFA\n   Qté: ${item.quantity}\n------------------------------------------\n`;
+      msg += `🛍️ *${idx + 1}. ${item.name}*\n  Prix: ${item.price.toLocaleString()} FCFA\n  Qté: ${item.quantity}\n------------------------------------------\n`;
     });
     msg += `\n🎯 *TOTAL GÉNÉRAL:* ${cartTotal.toLocaleString()} FCFA\n\nMerci de confirmer la disponibilité pour expédition immédiate !`;
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
@@ -106,8 +110,6 @@ export default function ClientApp() {
               <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-green-50 hover:bg-green-100 text-green-600 flex items-center justify-center" title="WhatsApp"><Smartphone className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></a>
               <a href={FACEBOOK_URL} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold text-xs w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center" title="Facebook">f</a>
               <a href={TIKTOK_URL} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-zinc-50 hover:bg-zinc-100 text-zinc-900 flex items-center justify-center" title="TikTok"><Video className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></a>
-              
-              {/* DISCREET ADMIN ACCESS BUTTON */}
               <a href="#admin" className="p-1.5 rounded-lg bg-zinc-100 hover:bg-amber-100 text-zinc-600 hover:text-amber-600 flex items-center justify-center transition-colors" title="Tableau de bord Admin">
                 <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </a>
@@ -156,13 +158,12 @@ export default function ClientApp() {
 
         {filteredProducts.length === 0 ? (
           <div className="bg-white rounded-2xl p-16 text-center border border-gray-100">
-            <p className="text-gray-400 text-sm">Aucun produit ne correspond à votre recherche.</p>
+            <p className="text-gray-400 text-sm">Aucun produit disponible pour le moment.</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
             {filteredProducts.map((p) => {
               const itemQtyInCart = getProductCartQty(p.id);
-              const isOutOfStock = p.quantity !== null ? p.quantity <= 0 : !p.stock_status;
 
               return (
                 <div key={p.id} className="bg-white rounded-xl border border-gray-200/60 overflow-hidden flex flex-col justify-between group transition-all duration-300 hover:shadow-lg relative">
@@ -173,14 +174,9 @@ export default function ClientApp() {
                     <img src={p.image_url} alt={p.name} className="object-cover w-full h-full" />
                     <div className="absolute bottom-2 left-2 z-10">
                       <span className="bg-[#f68b1e] text-white font-bold text-[10px] px-2 py-0.5 rounded shadow-md">
-                        {p.quantity > 0 ? `${p.quantity} en stock` : 'Rupture de stock'}
+                        {p.quantity} en stock
                       </span>
                     </div>
-                    {isOutOfStock && (
-                      <div className="absolute inset-0 bg-white/80 backdrop-blur-[1px] flex items-center justify-center">
-                        <span className="bg-zinc-800 text-white font-bold text-[10px] uppercase tracking-widest px-2.5 py-1 rounded">ÉPUISÉ</span>
-                      </div>
-                    )}
                   </div>
                   <div className="p-3 flex-1 flex flex-col justify-between bg-white">
                     <div>
@@ -199,13 +195,9 @@ export default function ClientApp() {
                       </div>
                     </div>
                     <div className="mt-3">
-                      <p className="text-lg md:text-xl font-black text-[#f68b1e] tracking-tight mb-2">Prix: {p.price.toLocaleString()} FCFA</p>
+                      <p className="text-lg md:text-xl font-black text-[#f68b1e] tracking-tight mb-2">Prix: {p.price?.toLocaleString()} FCFA</p>
                       <div className="mt-2.5">
-                        {isOutOfStock ? (
-                          <button disabled className="w-full bg-gray-100 text-gray-400 text-[11px] font-bold py-1.5 rounded-lg cursor-not-allowed">
-                            Rupture de stock
-                          </button>
-                        ) : itemQtyInCart > 0 ? (
+                        {itemQtyInCart > 0 ? (
                           <div className="flex items-center justify-between border border-[#f68b1e] rounded-lg overflow-hidden bg-white h-7 shadow-sm">
                             <button onClick={() => changeQuantity(p, -1)} className="bg-[#f68b1e]/5 text-[#f68b1e] w-8 h-full flex items-center justify-center font-bold">-</button>
                             <span className="w-full text-center text-xs font-black text-black">{itemQtyInCart}</span>
@@ -251,7 +243,7 @@ export default function ClientApp() {
                         <img src={item.image_url} alt="" className="w-10 h-10 object-cover rounded bg-white border" />
                         <div>
                           <h4 className="text-sm font-extrabold text-black line-clamp-1">{item.name}</h4>
-                          <p className="text-sm font-black text-[#f68b1e]">Prix: {item.price.toLocaleString()} FCFA</p>
+                          <p className="text-sm font-black text-[#f68b1e]">Prix: {item.price?.toLocaleString()} FCFA</p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-1.5 bg-white border rounded p-0.5">

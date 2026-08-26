@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './utils/supabaseClient';
-import { ShieldCheck, Trash2, Pencil, LogOut, Users, Package, Phone, CheckCircle, X, DollarSign, TrendingUp, Layers, Eye } from 'lucide-react';
+import { ShieldCheck, Trash2, Pencil, LogOut, Users, Package, Phone, CheckCircle, X, DollarSign, TrendingUp, Layers, Eye, Archive, RotateCcw } from 'lucide-react';
 
 export default function AdminApp() {
   const [session, setSession] = useState(null);
@@ -12,20 +12,21 @@ export default function AdminApp() {
   const [activeTab, setActiveTab] = useState('inventory'); // 'inventory', 'customers', or 'storefront'
   const [products, setProducts] = useState([]);
   const [selectedBatchFilter, setSelectedBatchFilter] = useState('ALL');
+  const [showArchived, setShowArchived] = useState(false);
 
   // Inventory states
   const [name, setName] = useState('');
-  const [price, setPrice] = useState(''); // Selling Price
-  const [costPrice, setCostPrice] = useState(''); // Cost Price
-  const [quantity, setQuantity] = useState(''); // Current Stock
-  const [initialQuantity, setInitialQuantity] = useState(''); // Constant Initial Purchase Qty
+  const [price, setPrice] = useState('');
+  const [costPrice, setCostPrice] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [initialQuantity, setInitialQuantity] = useState('');
   const [description, setDescription] = useState('');
   const [batch, setBatch] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
 
-  // Customer Ledger (Stored in Supabase database)
+  // Customer Ledger
   const [customers, setCustomers] = useState([]);
 
   const [ledgerForm, setLedgerForm] = useState({ 
@@ -35,7 +36,7 @@ export default function AdminApp() {
     initialPaid: '' 
   });
   
-  // Cart Holder States (Persistent via localStorage for active session convenience)
+  // Cart Holder States
   const [cartItems, setCartItems] = useState(() => {
     try {
       const savedCart = localStorage.getItem('akuDonCart');
@@ -50,7 +51,6 @@ export default function AdminApp() {
   const [paymentForm, setPaymentForm] = useState({ amount: '', customerId: null });
   const [editingCustomer, setEditingCustomer] = useState(null);
 
-  // Auto-save cart items to local storage so active carts don't vanish on accidental refresh
   useEffect(() => {
     localStorage.setItem('akuDonCart', JSON.stringify(cartItems));
   }, [cartItems]);
@@ -65,6 +65,7 @@ export default function AdminApp() {
 
   const fetchProducts = async () => {
     try {
+      // Fetch all products including soft-deleted ones for retained financial metrics
       const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
       if (!error && data) setProducts(data);
     } catch (err) {
@@ -112,7 +113,6 @@ export default function AdminApp() {
 
   const handleAdminLogout = async () => await supabase.auth.signOut();
 
-  // IMAGE COMPRESSOR FUNCTION
   const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.75) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -138,7 +138,7 @@ export default function AdminApp() {
 
   const handleSaveProduct = async (e) => {
     e.preventDefault();
-    if (!name || !price || !quantity || !batch) return;
+    if (!name || !price || quantity === '' || !batch) return;
     setUploading(true);
     let image_url = editingProduct ? editingProduct.image_url : 'https://images.unsplash.com/photo-1596462502278-27bfdc403348?auto=format&fit=crop&w=600&q=80';
     try {
@@ -152,7 +152,7 @@ export default function AdminApp() {
         }
       }
       const parsedQty = parseInt(quantity) || 0;
-      const parsedInitQty = initialQuantity ? parseInt(initialQuantity) : (editingProduct ? editingProduct.initial_quantity : parsedQty);
+      const parsedInitQty = initialQuantity !== '' ? parseInt(initialQuantity) : (editingProduct ? editingProduct.initial_quantity : parsedQty);
 
       const payload = { 
         name: name.trim(), 
@@ -163,7 +163,8 @@ export default function AdminApp() {
         quantity: parsedQty, 
         initial_quantity: parsedInitQty || parsedQty,
         stock_status: parsedQty > 0, 
-        batch_reference: batch.trim().toUpperCase()
+        batch_reference: batch.trim().toUpperCase(),
+        is_archived: false
       };
 
       if (editingProduct) {
@@ -188,7 +189,7 @@ export default function AdminApp() {
     setPrice(p.price);
     setCostPrice(p.cost_price || '');
     setQuantity(p.quantity);
-    setInitialQuantity(p.initial_quantity || p.quantity);
+    setInitialQuantity(p.initial_quantity !== undefined && p.initial_quantity !== null ? p.initial_quantity : p.quantity);
     setDescription(p.description || '');
     setBatch(p.batch_reference || '');
   };
@@ -201,23 +202,37 @@ export default function AdminApp() {
   const handleUpdateStockVolume = async (id, newVolume) => {
     const parsedVolume = parseInt(newVolume) || 0;
     const { error } = await supabase.from('products').update({ quantity: parsedVolume, stock_status: parsedVolume > 0 }).eq('id', id);
-    if (!error) setProducts(prev => prev.map(p => p.id === id ? { ...p, quantity: parsedVolume, stock_status: parsedVolume > 0 } : p));
+    if (!error) setProducts(prev => prev.map(p => String(p.id) === String(id) ? { ...p, quantity: parsedVolume, stock_status: parsedVolume > 0 } : p));
   };
 
-  const handleDeleteProduct = async (id) => {
-    if (!window.confirm('Voulez-vous vraiment supprimer cet article de la liste ?')) return;
-    const { error } = await supabase.from('products').delete().eq('id', id);
-    if (!error) setProducts(prev => prev.filter(p => p.id !== id));
+  // SOFT-DELETE ARCHIVING FUNCTION
+  const handleArchiveProduct = async (id, archiveState = true) => {
+    const confirmMsg = archiveState 
+      ? 'Voulez-vous archiver ce produit ? Il conservera ses données financières mais ne sera plus actif.' 
+      : 'Voulez-vous restaurer ce produit dans le catalogue actif ?';
+    if (!window.confirm(confirmMsg)) return;
+
+    const { error } = await supabase.from('products').update({ is_archived: archiveState }).eq('id', id);
+    if (!error) {
+      setProducts(prev => prev.map(p => String(p.id) === String(id) ? { ...p, is_archived: archiveState } : p));
+    } else {
+      alert(`Erreur d'archivage: ${error.message}`);
+    }
   };
 
   // --- CART / HOLDER FUNCTIONS ---
   const handleAddToCart = () => {
     if (!cartProductId) return;
-    const prod = products.find(p => p.id === parseInt(cartProductId) || p.id === cartProductId);
-    if (!prod) return;
+    const prod = products.find(p => String(p.id) === String(cartProductId));
+    if (!prod || prod.is_archived) return;
     const qty = parseInt(cartQty) || 1;
 
-    const existingIndex = cartItems.findIndex(item => item.productId === prod.id);
+    if (qty > prod.quantity) {
+      alert(`Quantité sélectionnée supérieure au stock disponible (${prod.quantity}).`);
+      return;
+    }
+
+    const existingIndex = cartItems.findIndex(item => String(item.productId) === String(prod.id));
     if (existingIndex > -1) {
       const updated = [...cartItems];
       updated[existingIndex].qty += qty;
@@ -254,8 +269,6 @@ export default function AdminApp() {
   };
 
   const cartTotal = cartItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  
-  // Safe calculation variables for the partial payment display
   const paidAmount = parseFloat(ledgerForm.initialPaid) || 0;
   const remainingDebt = Math.max(0, cartTotal - paidAmount);
 
@@ -277,7 +290,6 @@ export default function AdminApp() {
 
       let targetCustomerId = ledgerForm.customerId;
 
-      // 1. If new customer, create in Supabase first
       if (ledgerForm.customerId === 'new') {
         const { data: newCustData, error: custErr } = await supabase.from('customers').insert([{
           name: ledgerForm.newName.trim(),
@@ -288,9 +300,9 @@ export default function AdminApp() {
         if (custErr) throw custErr;
         targetCustomerId = newCustData.id;
       } else {
-        // Update existing customer total debt
-        const existingCust = customers.find(c => c.id === ledgerForm.customerId);
-        const newTotalDebt = (existingCust ? existingCust.totalDebt : 0) + balance;
+        const existingCust = customers.find(c => String(c.id) === String(ledgerForm.customerId));
+        const currentDebt = existingCust ? parseFloat(existingCust.totalDebt) || 0 : 0;
+        const newTotalDebt = currentDebt + balance;
         
         const { error: updateErr } = await supabase.from('customers').update({
           total_debt: newTotalDebt
@@ -299,7 +311,6 @@ export default function AdminApp() {
         if (updateErr) throw updateErr;
       }
 
-      // 2. Insert transaction history into Supabase
       const { error: histErr } = await supabase.from('customer_history').insert([{
         customer_id: targetCustomerId,
         date: currentDate,
@@ -315,13 +326,15 @@ export default function AdminApp() {
 
       if (histErr) throw histErr;
 
-      // 3. Deduct stock automatically from Supabase for all items in cart
       for (const item of cartItems) {
         if (item.productId) {
-          const selectedProd = products.find(p => p.id === item.productId);
+          const selectedProd = products.find(p => String(p.id) === String(item.productId));
           if (selectedProd) {
             const newStock = Math.max(0, selectedProd.quantity - item.qty);
-            await handleUpdateStockVolume(selectedProd.id, newStock);
+            await supabase.from('products').update({ 
+              quantity: newStock, 
+              stock_status: newStock > 0 
+            }).eq('id', selectedProd.id);
           }
         }
       }
@@ -330,20 +343,21 @@ export default function AdminApp() {
       setCartItems([]);
       localStorage.removeItem('akuDonCart');
       
+      await fetchProducts();
       await fetchCustomersFromSupabase();
-      alert('Vente enregistrée dans la base de données Supabase, calculs effectués et stocks réduits !');
+      alert('Vente enregistrée avec succès !');
     } catch (err) {
-      alert(`Erreur lors de l'enregistrement de la vente: ${err.message}`);
+      alert(`Erreur lors de l'enregistrement: ${err.message}`);
     }
   };
 
-  const handleRecordPayment = async (e, customerId, currentDebt, customerHistory) => {
+  const handleRecordPayment = async (e, customerId, currentDebt) => {
     e.preventDefault();
     const payAmt = parseFloat(paymentForm.amount) || 0;
     if (payAmt <= 0) return;
 
     try {
-      const newDebt = currentDebt - payAmt;
+      const newDebt = Math.max(0, currentDebt - payAmt);
 
       const { error: updateErr } = await supabase.from('customers').update({
         total_debt: newDebt
@@ -366,7 +380,7 @@ export default function AdminApp() {
 
       setPaymentForm({ amount: '', customerId: null });
       await fetchCustomersFromSupabase();
-      alert('Paiement enregistré dans Supabase avec succès !');
+      alert('Paiement enregistré !');
     } catch (err) {
       alert(`Erreur de paiement: ${err.message}`);
     }
@@ -385,7 +399,7 @@ export default function AdminApp() {
 
       setEditingCustomer(null);
       await fetchCustomersFromSupabase();
-      alert('Informations client mises à jour dans Supabase !');
+      alert('Informations client mises à jour !');
     } catch (err) {
       alert(`Erreur mise à jour client: ${err.message}`);
     }
@@ -393,13 +407,13 @@ export default function AdminApp() {
 
   const getProductSoldQty = (productId) => {
     return customers.reduce((acc, c) => {
-      return acc + c.history.reduce((hAcc, h) => {
+      return acc + (c.history || []).reduce((hAcc, h) => {
         if (h.items && Array.isArray(h.items)) {
-          const item = h.items.find(i => i.productId === productId);
-          return hAcc + (item ? item.qty : 0);
+          const item = h.items.find(i => String(i.productId) === String(productId));
+          return hAcc + (item ? (parseInt(item.qty) || 0) : 0);
         } else {
-          if (h.productId === productId) {
-            return hAcc + (h.qty || 1);
+          if (String(h.productId) === String(productId)) {
+            return hAcc + (parseInt(h.qty) || 1);
           }
         }
         return hAcc;
@@ -407,7 +421,7 @@ export default function AdminApp() {
     }, 0);
   };
 
-  // --- DASHBOARD FINANCIAL CALCULATIONS (6 BOXES) ---
+  // --- RETENTION OF HISTORICAL FINANCIAL CALCULATIONS (Includes Archived Items) ---
   const getTrueInitialQty = (p) => {
     if (p.initial_quantity !== undefined && p.initial_quantity !== null && p.initial_quantity !== '') {
       return parseInt(p.initial_quantity);
@@ -416,36 +430,45 @@ export default function AdminApp() {
     return (parseInt(p.quantity) || 0) + soldQty;
   };
 
+  // 1. Total initial cost across ALL products (active + archived)
   const totalInventoryCost = products.reduce((acc, p) => {
     return acc + ((parseFloat(p.cost_price) || 0) * getTrueInitialQty(p));
   }, 0);
 
+  // 2. Total expected revenue across ALL products (active + archived)
   const totalExpectedRevenue = products.reduce((acc, p) => {
     return acc + ((parseFloat(p.price) || 0) * getTrueInitialQty(p));
   }, 0);
 
-  const totalPotentialRetail = products.reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
+  // 3. Current active retail value (Non-archived items with stock)
+  const totalPotentialRetail = products
+    .filter(p => !p.is_archived)
+    .reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
 
+  // 4. Total Cost of Goods Sold across historical logs
   const totalGoodsSoldCost = products.reduce((acc, p) => {
     const soldQty = getProductSoldQty(p.id);
     return acc + ((parseFloat(p.cost_price) || 0) * soldQty);
   }, 0);
 
   const totalSalesRevenue = customers.reduce((acc, c) => {
-    return acc + c.history.reduce((hAcc, h) => hAcc + (h.total || 0), 0);
+    return acc + (c.history || []).reduce((hAcc, h) => hAcc + (parseFloat(h.total) || 0), 0);
   }, 0);
 
-  const totalOutstandingDebt = customers.reduce((acc, c) => acc + (c.totalDebt || 0), 0);
+  const totalOutstandingDebt = customers.reduce((acc, c) => acc + (parseFloat(c.totalDebt) || 0), 0);
 
+  // Inventory Table Filter
   const uniqueBatches = ['ALL', ...new Set(products.map(p => p.batch_reference).filter(Boolean))];
-  const filteredProducts = selectedBatchFilter === 'ALL' 
-    ? products 
-    : products.filter(p => p.batch_reference === selectedBatchFilter);
+  const filteredProducts = products.filter(p => {
+    const matchesBatch = selectedBatchFilter === 'ALL' || p.batch_reference === selectedBatchFilter;
+    const matchesArchiveState = showArchived ? p.is_archived : !p.is_archived;
+    return matchesBatch && matchesArchiveState;
+  });
 
-  // STRICT FRONT PAGE FILTER: ONLY DISPLAY PRODUCTS WITH REMAINING STOCK >= 1 (HIDING 0 OR LESS)
+  // STRICT FRONT PAGE FILTER: UNARCHIVED & QUANTITY >= 1
   const frontPageProducts = products.filter(p => {
     const qty = parseInt(p.quantity);
-    return !isNaN(qty) && qty >= 1;
+    return !p.is_archived && !isNaN(qty) && qty >= 1;
   });
 
   if (!session) {
@@ -477,7 +500,7 @@ export default function AdminApp() {
     <div className="min-h-screen bg-[#f5f5f7] text-gray-900 font-sans p-3 sm:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         
-        {/* ADMIN HEADER & NAVIGATION */}
+        {/* HEADER */}
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
           <div className="flex flex-wrap gap-2 w-full sm:w-auto">
             <button onClick={() => setActiveTab('inventory')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'inventory' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
@@ -495,7 +518,7 @@ export default function AdminApp() {
           </button>
         </div>
 
-        {/* FINANCIAL METRICS DASHBOARD OVERVIEW (6 BOXES) */}
+        {/* FINANCIAL METRICS (RETAINS ARCHIVED PRODUCT METRICS) */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
             <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Achat Initial (Constant)</p>
@@ -506,7 +529,7 @@ export default function AdminApp() {
             <p className="text-sm sm:text-lg font-black text-indigo-600 mt-1">{totalExpectedRevenue.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Valeur Stock Actuel (Variable)</p>
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Valeur Stock Actuel (Actif)</p>
             <p className="text-sm sm:text-lg font-black text-orange-600 mt-1">{totalPotentialRetail.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
@@ -523,7 +546,7 @@ export default function AdminApp() {
           </div>
         </div>
 
-        {/* TAB 1: INVENTORY & BATCHES */}
+        {/* TAB 1: INVENTORY & ARCHIVE MANAGEMENT */}
         {activeTab === 'inventory' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit">
@@ -571,10 +594,16 @@ export default function AdminApp() {
             <div className="lg:col-span-2 bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-4">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-3 border-b gap-3">
                 <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 flex items-center">
-                  <Layers className="w-4 h-4 mr-1.5 text-orange-600" /> Gestionnaire de Catalogue par Batch
+                  <Layers className="w-4 h-4 mr-1.5 text-orange-600" /> Catalogue des Produits
                 </h3>
-                <div className="flex items-center space-x-2 w-full sm:w-auto">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Filtrer Batch:</span>
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <button 
+                    onClick={() => setShowArchived(!showArchived)} 
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 ${showArchived ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}
+                  >
+                    <Archive className="w-3.5 h-3.5" />
+                    <span>{showArchived ? 'Voir Actifs' : 'Voir Archivés'}</span>
+                  </button>
                   <select value={selectedBatchFilter} onChange={e => setSelectedBatchFilter(e.target.value)} className="border p-1.5 text-xs rounded-lg bg-gray-50 font-bold">
                     {uniqueBatches.map(b => <option key={b} value={b}>{b}</option>)}
                   </select>
@@ -596,11 +625,14 @@ export default function AdminApp() {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {filteredProducts.map((p) => (
-                      <tr key={p.id} className="hover:bg-gray-50/50">
+                      <tr key={p.id} className={`hover:bg-gray-50/50 ${p.is_archived ? 'opacity-60 bg-gray-50' : ''}`}>
                         <td className="p-2.5">
                           <img src={p.image_url} alt={p.name} className="w-10 h-10 object-cover rounded-lg border" />
                         </td>
-                        <td className="p-2.5 font-extrabold">{p.name}</td>
+                        <td className="p-2.5 font-extrabold">
+                          {p.name}
+                          {p.is_archived && <span className="ml-2 text-[9px] bg-gray-200 text-gray-700 font-bold px-1.5 py-0.5 rounded">Archivé</span>}
+                        </td>
                         <td className="p-2.5">
                           <span className="bg-orange-100 text-orange-800 font-bold px-2 py-0.5 rounded text-[10px]">
                             {p.batch_reference || 'N/A'}
@@ -615,15 +647,23 @@ export default function AdminApp() {
                           <button onClick={() => handleStartEditProduct(p)} className="text-blue-500 hover:text-blue-700" title="Modifier">
                             <Pencil className="w-4 h-4 inline" />
                           </button>
-                          <button onClick={() => handleDeleteProduct(p.id)} className="text-red-400 hover:text-red-600" title="Supprimer">
-                            <Trash2 className="w-4 h-4 inline" />
-                          </button>
+                          {p.is_archived ? (
+                            <button onClick={() => handleArchiveProduct(p.id, false)} className="text-green-600 hover:text-green-800" title="Restaurer">
+                              <RotateCcw className="w-4 h-4 inline" />
+                            </button>
+                          ) : (
+                            <button onClick={() => handleArchiveProduct(p.id, true)} className="text-purple-600 hover:text-purple-800" title="Archiver (Soft Delete)">
+                              <Archive className="w-4 h-4 inline" />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
                     {filteredProducts.length === 0 && (
                       <tr>
-                        <td colSpan="7" className="text-center py-8 text-gray-400 text-xs">Aucun produit trouvé pour ce batch.</td>
+                        <td colSpan="7" className="text-center py-8 text-gray-400 text-xs">
+                          {showArchived ? 'Aucun produit archivé.' : 'Aucun produit actif disponible.'}
+                        </td>
                       </tr>
                     )}
                   </tbody>
@@ -633,7 +673,7 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* TAB 2: SUPABASE CUSTOMER LEDGER WITH MULTI-ITEM CART */}
+        {/* TAB 2: LEDGER AND CART */}
         {activeTab === 'customers' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit space-y-4">
@@ -660,8 +700,8 @@ export default function AdminApp() {
                   <label className="text-[10px] text-gray-500 font-bold uppercase block">Ajouter des articles au panier</label>
                   <div className="grid grid-cols-1 gap-2">
                     <select value={cartProductId} onChange={e => setCartProductId(e.target.value)} className="w-full border p-2 text-xs rounded-lg bg-white">
-                      <option value="">-- Choisir un produit de l'inventaire --</option>
-                      {products.map(p => (
+                      <option value="">-- Choisir un produit actif --</option>
+                      {products.filter(p => !p.is_archived).map(p => (
                         <option key={p.id} value={p.id}>
                           [{p.batch_reference || 'N/A'}] {p.name} - {p.price?.toLocaleString()} FCFA (Stock: {p.quantity})
                         </option>
@@ -700,7 +740,7 @@ export default function AdminApp() {
                                   <input type="number" value={item.price} onChange={(e) => handleUpdateCartItemPrice(index, e.target.value)} className="w-24 border text-right p-1 rounded font-bold text-xs" />
                                 </td>
                                 <td className="p-2 text-center">
-                                  <button type="button" onClick={() => handleRemoveFromCart(index)} className="text-red-500 hover:text-red-700 p-1" title="Supprimer">
+                                  <button type="button" onClick={() => handleRemoveFromCart(index)} className="text-red-500 hover:text-red-700 p-1">
                                     <Trash2 className="w-4 h-4 inline" />
                                   </button>
                                 </td>
@@ -745,7 +785,7 @@ export default function AdminApp() {
 
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 mb-4 pb-2 border-b">Balances Clients & Historique (Supabase Database)</h3>
+                <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 mb-4 pb-2 border-b">Balances Clients & Historique</h3>
                 
                 {editingCustomer && (
                   <form onSubmit={handleSaveCustomerEdit} className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-xl space-y-3">
@@ -771,7 +811,7 @@ export default function AdminApp() {
                             <p className="text-[11px] text-gray-500 flex items-center mt-0.5"><Phone className="w-3 h-3 mr-1" /> {c.phone || 'Pas de téléphone'}</p>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <button onClick={() => setEditingCustomer(c)} className="text-gray-400 hover:text-blue-600 text-xs" title="Modifier">
+                            <button onClick={() => setEditingCustomer(c)} className="text-gray-400 hover:text-blue-600 text-xs">
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
                             <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${c.totalDebt > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
@@ -781,7 +821,7 @@ export default function AdminApp() {
                         </div>
                         
                         {c.totalDebt > 0 && (
-                          <form onSubmit={(e) => handleRecordPayment(e, c.id, c.totalDebt, c.history)} className="mt-3 flex space-x-2">
+                          <form onSubmit={(e) => handleRecordPayment(e, c.id, c.totalDebt)} className="mt-3 flex space-x-2">
                             <input type="number" placeholder="Montant du paiement" value={paymentForm.customerId === c.id ? paymentForm.amount : ''} onChange={e => setPaymentForm({ amount: e.target.value, customerId: c.id })} className="w-full border p-1.5 text-xs rounded bg-white" required />
                             <button type="submit" className="bg-green-600 text-white text-[10px] px-3 rounded font-bold whitespace-nowrap">Régler Dette</button>
                           </form>
@@ -817,13 +857,13 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* TAB 3: STOREFRONT PREVIEW (STRICTLY STOCK >= 1) */}
+        {/* TAB 3: STOREFRONT PREVIEW (STRICTLY UNARCHIVED AND STOCK >= 1) */}
         {activeTab === 'storefront' && (
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b gap-2">
               <div>
                 <h3 className="font-black text-sm uppercase tracking-wide text-gray-900">Aperçu Front-Page (Catalogue Public)</h3>
-                <p className="text-xs text-gray-500 mt-0.5">Seuls les articles avec au moins 1 produit en stock (quantité &gt;= 1) sont affichés ici.</p>
+                <p className="text-xs text-gray-500 mt-0.5">Seuls les articles non-archivés avec au moins 1 produit en stock (quantité &gt;= 1) sont affichés ici.</p>
               </div>
               <span className="bg-green-100 text-green-800 text-xs font-bold px-3 py-1 rounded-full">
                 {frontPageProducts.length} articles visibles sur la boutique
@@ -851,7 +891,7 @@ export default function AdminApp() {
               ))}
               {frontPageProducts.length === 0 && (
                 <div className="col-span-full text-center py-12 text-gray-400 text-xs">
-                  Aucun produit en stock pour le moment.
+                  Aucun produit actif en stock pour le moment.
                 </div>
               )}
             </div>
