@@ -301,13 +301,19 @@ export default function AdminApp() {
     alert('Informations client mises à jour !');
   };
 
-  const getProductSoldQty = (productId, productName) => {
+  // Improved calculation to read inside multi-item carts correctly
+  const getProductSoldQty = (productId) => {
     return customers.reduce((acc, c) => {
       return acc + c.history.reduce((hAcc, h) => {
-        const matchesId = h.productId && h.productId === productId;
-        const matchesName = h.goods && h.goods.toLowerCase().includes(productName?.toLowerCase());
-        if (matchesId || matchesName) {
-          return hAcc + (h.qty || 1);
+        // If transaction has multi-items saved, parse them
+        if (h.items && Array.isArray(h.items)) {
+          const item = h.items.find(i => i.productId === productId);
+          return hAcc + (item ? item.qty : 0);
+        } else {
+          // Fallback for older transactions
+          if (h.productId === productId) {
+            return hAcc + (h.qty || 1);
+          }
         }
         return hAcc;
       }, 0);
@@ -316,16 +322,24 @@ export default function AdminApp() {
 
   // --- DASHBOARD FINANCIAL CALCULATIONS (6 BOXES) ---
   
-  // 1. Total Achat Initial (Constant) -> Cost Price * Initial Quantity
+  // Helper to guarantee initial quantity stays strictly constant regardless of DB state
+  const getTrueInitialQty = (p) => {
+    if (p.initial_quantity !== undefined && p.initial_quantity !== null && p.initial_quantity !== '') {
+      return parseInt(p.initial_quantity);
+    }
+    // Dynamic Fallback: Current Stock + Sold Stock = Original Amount (This mathematically prevents dropping)
+    const soldQty = getProductSoldQty(p.id);
+    return (parseInt(p.quantity) || 0) + soldQty;
+  };
+
+  // 1. Total Achat Initial (Constant) -> Cost Price * Guaranteed Initial Quantity
   const totalInventoryCost = products.reduce((acc, p) => {
-    const initialQty = p.initial_quantity !== undefined && p.initial_quantity !== null ? p.initial_quantity : p.quantity;
-    return acc + ((parseFloat(p.cost_price) || 0) * (parseInt(initialQty) || 0));
+    return acc + ((parseFloat(p.cost_price) || 0) * getTrueInitialQty(p));
   }, 0);
 
-  // 2. Total Vente Initiale (Constant) -> Selling Price * Initial Quantity
+  // 2. Total Vente Initiale (Constant) -> Selling Price * Guaranteed Initial Quantity
   const totalExpectedRevenue = products.reduce((acc, p) => {
-    const initialQty = p.initial_quantity !== undefined && p.initial_quantity !== null ? p.initial_quantity : p.quantity;
-    return acc + ((parseFloat(p.price) || 0) * (parseInt(initialQty) || 0));
+    return acc + ((parseFloat(p.price) || 0) * getTrueInitialQty(p));
   }, 0);
 
   // 3. Valeur Stock Actuel (Variable) -> Selling Price * Current Remaining Stock
@@ -333,11 +347,11 @@ export default function AdminApp() {
 
   // 4. Coût Marchandises Vendues (COGS) -> Cost Price * Sold Qty
   const totalGoodsSoldCost = products.reduce((acc, p) => {
-    const soldQty = getProductSoldQty(p.id, p.name);
+    const soldQty = getProductSoldQty(p.id);
     return acc + ((parseFloat(p.cost_price) || 0) * soldQty);
   }, 0);
 
-  // 5. Total Ventes (Revenue) -> Scans and accumulates all customer purchase totals (`h.total`)
+  // 5. Total Ventes (Revenue) -> Accumulates all customer purchase totals
   const totalSalesRevenue = customers.reduce((acc, c) => {
     return acc + c.history.reduce((hAcc, h) => hAcc + (h.total || 0), 0);
   }, 0);
