@@ -81,7 +81,6 @@ export default function AdminApp() {
 
       if (error) throw error;
       if (data) {
-        // Map Supabase relational structure to application format
         const formatted = data.map(c => ({
           id: c.id,
           name: c.name,
@@ -255,6 +254,10 @@ export default function AdminApp() {
   };
 
   const cartTotal = cartItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
+  
+  // Safe calculation variables for the partial payment display
+  const paidAmount = parseFloat(ledgerForm.initialPaid) || 0;
+  const remainingDebt = Math.max(0, cartTotal - paidAmount);
 
   const handleFinalizeSale = async (e) => {
     e.preventDefault();
@@ -268,8 +271,7 @@ export default function AdminApp() {
     }
 
     try {
-      const iPaid = parseFloat(ledgerForm.initialPaid) || 0;
-      const balance = cartTotal - iPaid;
+      const balance = remainingDebt;
       const goodsDescription = cartItems.map(item => `${item.qty}x ${item.name} (${item.batch})`).join(', ');
       const currentDate = new Date().toISOString().split('T')[0];
 
@@ -287,7 +289,7 @@ export default function AdminApp() {
         targetCustomerId = newCustData.id;
       } else {
         // Update existing customer total debt
-        const existingCust = customers.find(c => c.id === parseInt(ledgerForm.customerId));
+        const existingCust = customers.find(c => c.id === ledgerForm.customerId);
         const newTotalDebt = (existingCust ? existingCust.totalDebt : 0) + balance;
         
         const { error: updateErr } = await supabase.from('customers').update({
@@ -306,7 +308,7 @@ export default function AdminApp() {
         qty: cartItems.reduce((sum, item) => sum + item.qty, 0),
         goods: goodsDescription,
         total: cartTotal,
-        paid: iPaid,
+        paid: paidAmount,
         type: 'Sale',
         items: cartItems
       }]);
@@ -343,14 +345,12 @@ export default function AdminApp() {
     try {
       const newDebt = currentDebt - payAmt;
 
-      // Update customer debt in Supabase
       const { error: updateErr } = await supabase.from('customers').update({
         total_debt: newDebt
       }).eq('id', customerId);
 
       if (updateErr) throw updateErr;
 
-      // Add payment record to history table in Supabase
       const { error: histErr } = await supabase.from('customer_history').insert([{
         customer_id: customerId,
         date: new Date().toLocaleString(),
@@ -724,11 +724,11 @@ export default function AdminApp() {
                     </div>
                     <div className="flex justify-between text-gray-600">
                       <span>Montant Payé:</span>
-                      <span className="font-bold text-green-600">{(parseFloat(ledgerForm.initialPaid) || 0).toLocaleString()} FCFA</span>
+                      <span className="font-bold text-green-600">{paidAmount.toLocaleString()} FCFA</span>
                     </div>
                     <div className="flex justify-between border-t border-orange-200 pt-1 text-orange-900 font-extrabold">
                       <span>Ajouté à la Dette:</span>
-                      <span>{Math.max(0, cartTotal - (parseFloat(ledgerForm.initialPaid) || 0)).toLocaleString()} FCFA</span>
+                      <span>{remainingDebt.toLocaleString()} FCFA</span>
                     </div>
                   </div>
                 )}
