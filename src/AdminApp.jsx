@@ -442,7 +442,11 @@ export default function AdminApp() {
     ? products 
     : products.filter(p => p.batch_reference === selectedBatchFilter);
 
-  const frontPageProducts = products.filter(p => (p.quantity || 0) >= 1);
+  // STRICT FRONT PAGE FILTER: ONLY DISPLAY PRODUCTS WITH REMAINING STOCK >= 1 (HIDING 0 OR LESS)
+  const frontPageProducts = products.filter(p => {
+    const qty = parseInt(p.quantity);
+    return !isNaN(qty) && qty >= 1;
+  });
 
   if (!session) {
     return (
@@ -813,7 +817,7 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* TAB 3: STOREFRONT PREVIEW */}
+        {/* TAB 3: STOREFRONT PREVIEW (STRICTLY STOCK >= 1) */}
         {activeTab === 'storefront' && (
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b gap-2">
