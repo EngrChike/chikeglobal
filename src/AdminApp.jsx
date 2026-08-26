@@ -314,32 +314,35 @@ export default function AdminApp() {
     }, 0);
   };
 
-  // --- DASHBOARD FINANCIAL CALCULATIONS (CONSTANT & SALES) ---
+  // --- DASHBOARD FINANCIAL CALCULATIONS (6 BOXES) ---
   
-  // 1. Total Capital Investi (Achats) -> Constant based on initial purchase volume (cost_price * initial_quantity)
+  // 1. Total Achat Initial (Constant) -> Cost Price * Initial Quantity
   const totalInventoryCost = products.reduce((acc, p) => {
     const initialQty = p.initial_quantity !== undefined && p.initial_quantity !== null ? p.initial_quantity : p.quantity;
     return acc + ((parseFloat(p.cost_price) || 0) * (parseInt(initialQty) || 0));
   }, 0);
 
-  // 2. Total Prix de Vente Initial -> Constant based on initial purchase volume (selling_price * initial_quantity)
-  const totalConstantRetailValue = products.reduce((acc, p) => {
+  // 2. Total Vente Initiale (Constant) -> Selling Price * Initial Quantity
+  const totalExpectedRevenue = products.reduce((acc, p) => {
     const initialQty = p.initial_quantity !== undefined && p.initial_quantity !== null ? p.initial_quantity : p.quantity;
     return acc + ((parseFloat(p.price) || 0) * (parseInt(initialQty) || 0));
   }, 0);
 
-  // 3. Coût Marchandises Vendues (COGS)
+  // 3. Valeur Stock Actuel (Variable) -> Selling Price * Current Remaining Stock
+  const totalPotentialRetail = products.reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
+
+  // 4. Coût Marchandises Vendues (COGS) -> Cost Price * Sold Qty
   const totalGoodsSoldCost = products.reduce((acc, p) => {
     const soldQty = getProductSoldQty(p.id, p.name);
     return acc + ((parseFloat(p.cost_price) || 0) * soldQty);
   }, 0);
 
-  // 4. Total Ventes (Revenue) -> Scans and accumulates all customer purchase totals (`h.total`)
+  // 5. Total Ventes (Revenue) -> Scans and accumulates all customer purchase totals (`h.total`)
   const totalSalesRevenue = customers.reduce((acc, c) => {
     return acc + c.history.reduce((hAcc, h) => hAcc + (h.total || 0), 0);
   }, 0);
 
-  // 5. Total Dettes Clients Restantes
+  // 6. Total Dettes Clients
   const totalOutstandingDebt = customers.reduce((acc, c) => acc + (c.totalDebt || 0), 0);
 
   const uniqueBatches = ['ALL', ...new Set(products.map(p => p.batch_reference).filter(Boolean))];
@@ -396,27 +399,31 @@ export default function AdminApp() {
           </button>
         </div>
 
-        {/* FINANCIAL METRICS DASHBOARD OVERVIEW */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+        {/* FINANCIAL METRICS DASHBOARD OVERVIEW (6 BOXES) */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Capital Investi (Constant)</p>
-            <p className="text-base sm:text-xl font-black text-gray-900 mt-1">{totalInventoryCost.toLocaleString()} FCFA</p>
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Achat Initial (Constant)</p>
+            <p className="text-sm sm:text-lg font-black text-gray-900 mt-1">{totalInventoryCost.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Prix de Vente (Constant)</p>
-            <p className="text-base sm:text-xl font-black text-orange-600 mt-1">{totalConstantRetailValue.toLocaleString()} FCFA</p>
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Vente Initiale (Constant)</p>
+            <p className="text-sm sm:text-lg font-black text-indigo-600 mt-1">{totalExpectedRevenue.toLocaleString()} FCFA</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Valeur Stock Actuel (Variable)</p>
+            <p className="text-sm sm:text-lg font-black text-orange-600 mt-1">{totalPotentialRetail.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
             <p className="text-[10px] font-extrabold uppercase text-gray-400">Coût Marchandises Vendues</p>
-            <p className="text-base sm:text-xl font-black text-purple-600 mt-1">{totalGoodsSoldCost.toLocaleString()} FCFA</p>
+            <p className="text-sm sm:text-lg font-black text-purple-600 mt-1">{totalGoodsSoldCost.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
             <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Ventes (Revenue)</p>
-            <p className="text-base sm:text-xl font-black text-blue-600 mt-1">{totalSalesRevenue.toLocaleString()} FCFA</p>
+            <p className="text-sm sm:text-lg font-black text-blue-600 mt-1">{totalSalesRevenue.toLocaleString()} FCFA</p>
           </div>
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs col-span-2 lg:col-span-1">
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
             <p className="text-[10px] font-extrabold uppercase text-gray-400">Dettes Clients Restantes</p>
-            <p className="text-base sm:text-xl font-black text-red-600 mt-1">{totalOutstandingDebt.toLocaleString()} FCFA</p>
+            <p className="text-sm sm:text-lg font-black text-red-600 mt-1">{totalOutstandingDebt.toLocaleString()} FCFA</p>
           </div>
         </div>
 
