@@ -17,14 +17,15 @@ export default function AdminApp() {
   const [name, setName] = useState('');
   const [price, setPrice] = useState(''); // Selling Price
   const [costPrice, setCostPrice] = useState(''); // Cost Price
-  const [quantity, setQuantity] = useState('');
+  const [quantity, setQuantity] = useState(''); // Current Stock
+  const [initialQuantity, setInitialQuantity] = useState(''); // Constant Initial Purchase Qty
   const [description, setDescription] = useState('');
   const [batch, setBatch] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
 
-  // Customer Ledger & Multi-Item Cart (Holder) states - Initialized empty as requested
+  // Customer Ledger & Multi-Item Cart states
   const [customers, setCustomers] = useState([]);
   const [ledgerForm, setLedgerForm] = useState({ 
     customerId: '', 
@@ -33,7 +34,7 @@ export default function AdminApp() {
     initialPaid: '' 
   });
   
-  // Cart Holder States for Multiple Goods Selection
+  // Cart Holder States
   const [cartItems, setCartItems] = useState([]);
   const [cartProductId, setCartProductId] = useState('');
   const [cartQty, setCartQty] = useState('1');
@@ -114,6 +115,8 @@ export default function AdminApp() {
         }
       }
       const parsedQty = parseInt(quantity) || 0;
+      const parsedInitQty = initialQuantity ? parseInt(initialQuantity) : (editingProduct ? editingProduct.initial_quantity : parsedQty);
+
       const payload = { 
         name: name.trim(), 
         description: description.trim(), 
@@ -121,6 +124,7 @@ export default function AdminApp() {
         cost_price: parseFloat(costPrice) || 0,
         image_url, 
         quantity: parsedQty, 
+        initial_quantity: parsedInitQty || parsedQty,
         stock_status: parsedQty > 0, 
         batch_reference: batch.trim().toUpperCase()
       };
@@ -135,7 +139,7 @@ export default function AdminApp() {
         alert('Produit publié avec succès !');
       }
 
-      setName(''); setPrice(''); setCostPrice(''); setQuantity(''); setDescription(''); setBatch(''); setImageFile(null); setEditingProduct(null);
+      setName(''); setPrice(''); setCostPrice(''); setQuantity(''); setInitialQuantity(''); setDescription(''); setBatch(''); setImageFile(null); setEditingProduct(null);
       await fetchProducts();
     } catch (err) { alert(`Erreur: ${err.message}`); }
     finally { setUploading(false); }
@@ -147,13 +151,14 @@ export default function AdminApp() {
     setPrice(p.price);
     setCostPrice(p.cost_price || '');
     setQuantity(p.quantity);
+    setInitialQuantity(p.initial_quantity || p.quantity);
     setDescription(p.description || '');
     setBatch(p.batch_reference || '');
   };
 
   const handleCancelEditProduct = () => {
     setEditingProduct(null);
-    setName(''); setPrice(''); setCostPrice(''); setQuantity(''); setDescription(''); setBatch(''); setImageFile(null);
+    setName(''); setPrice(''); setCostPrice(''); setQuantity(''); setInitialQuantity(''); setDescription(''); setBatch(''); setImageFile(null);
   };
 
   const handleUpdateStockVolume = async (id, newVolume) => {
@@ -175,7 +180,6 @@ export default function AdminApp() {
     if (!prod) return;
     const qty = parseInt(cartQty) || 1;
 
-    // Check if product is already in cart
     const existingIndex = cartItems.findIndex(item => item.productId === prod.id);
     if (existingIndex > -1) {
       const updated = [...cartItems];
@@ -214,7 +218,6 @@ export default function AdminApp() {
 
   const cartTotal = cartItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
-  // FINALIZING MULTI-ITEM SALE
   const handleFinalizeSale = async (e) => {
     e.preventDefault();
     if (cartItems.length === 0) {
@@ -241,7 +244,7 @@ export default function AdminApp() {
       items: cartItems
     };
 
-    // Deduct stock automatically from Supabase for all items in cart
+    // Deduct current stock automatically from Supabase for all items in cart
     for (const item of cartItems) {
       if (item.productId) {
         const selectedProd = products.find(p => p.id === item.productId);
@@ -269,7 +272,6 @@ export default function AdminApp() {
       ));
     }
 
-    // Reset Form & Cart
     setLedgerForm({ customerId: '', newName: '', newPhone: '', initialPaid: '' });
     setCartItems([]);
     alert('Vente enregistrée avec succès, calcul effectué et stocks réduits !');
@@ -299,7 +301,6 @@ export default function AdminApp() {
     alert('Informations client mises à jour !');
   };
 
-  // HELPER TO CALCULATE TOTAL SOLD QUANTITY FOR A PRODUCT
   const getProductSoldQty = (productId, productName) => {
     return customers.reduce((acc, c) => {
       return acc + c.history.reduce((hAcc, h) => {
@@ -313,24 +314,31 @@ export default function AdminApp() {
     }, 0);
   };
 
-  // FINANCIAL CALCULATIONS
+  // --- DASHBOARD FINANCIAL CALCULATIONS ---
+  
+  // 1. Total Capital Investi (Achats) -> Constant based on initial purchase volume
   const totalInventoryCost = products.reduce((acc, p) => {
-    const soldQty = getProductSoldQty(p.id, p.name);
-    const initialQty = (parseInt(p.quantity) || 0) + soldQty;
-    return acc + ((parseFloat(p.cost_price) || 0) * initialQty);
+    const initialQty = p.initial_quantity !== undefined && p.initial_quantity !== null ? p.initial_quantity : p.quantity;
+    return acc + ((parseFloat(p.cost_price) || 0) * (parseInt(initialQty) || 0));
   }, 0);
 
+  // 2. Valeur Potentielle Stock
+  const totalPotentialRetail = products.reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
+
+  // 3. Coût Marchandises Vendues (COGS)
   const totalGoodsSoldCost = products.reduce((acc, p) => {
     const soldQty = getProductSoldQty(p.id, p.name);
     return acc + ((parseFloat(p.cost_price) || 0) * soldQty);
   }, 0);
 
-  const totalPotentialRetail = products.reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
-  const totalSalesRevenue = customers.reduce((acc, c) => acc + c.history.reduce((hAcc, h) => hAcc + (h.total || 0), 0), 0);
-  const totalCashCollected = customers.reduce((acc, c) => acc + c.history.reduce((hAcc, h) => hAcc + (h.paid || 0), 0), 0);
+  // 4. Total Ventes (Revenue) -> Scans and accumulates all customer purchase totals (`h.total`)
+  const totalSalesRevenue = customers.reduce((acc, c) => {
+    return acc + c.history.reduce((hAcc, h) => hAcc + (h.total || 0), 0);
+  }, 0);
+
+  // 5. Total Dettes Clients
   const totalOutstandingDebt = customers.reduce((acc, c) => acc + (c.totalDebt || 0), 0);
 
-  // Extract unique batch references for filtering
   const uniqueBatches = ['ALL', ...new Set(products.map(p => p.batch_reference).filter(Boolean))];
   const filteredProducts = selectedBatchFilter === 'ALL' 
     ? products 
@@ -436,9 +444,15 @@ export default function AdminApp() {
                     <input type="number" placeholder="Selling Price" value={price} onChange={e => setPrice(e.target.value)} className="w-full border p-2.5 text-xs rounded-lg" required />
                   </div>
                 </div>
-                <div>
-                  <label className="text-[10px] text-gray-400 font-bold block mb-1">Quantité en Stock</label>
-                  <input type="number" placeholder="Quantité" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-full border p-2.5 text-xs rounded-lg" required />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold block mb-1">Qté Initiale Achetée</label>
+                    <input type="number" placeholder="Total Acheté" value={initialQuantity} onChange={e => setInitialQuantity(e.target.value)} className="w-full border p-2.5 text-xs rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold block mb-1">Qté Actuelle Stock</label>
+                    <input type="number" placeholder="Stock Restant" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-full border p-2.5 text-xs rounded-lg" required />
+                  </div>
                 </div>
                 <textarea placeholder="Description" value={description} onChange={e => setDescription(e.target.value)} className="w-full border p-2.5 text-xs rounded-lg h-16" />
                 <input type="file" accept="image/*" onChange={e => setImageFile(e.target.files[0])} className="w-full text-xs text-gray-500" />
@@ -453,7 +467,6 @@ export default function AdminApp() {
                 <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 flex items-center">
                   <Layers className="w-4 h-4 mr-1.5 text-orange-600" /> Gestionnaire de Catalogue par Batch
                 </h3>
-                {/* BATCH FILTER */}
                 <div className="flex items-center space-x-2 w-full sm:w-auto">
                   <span className="text-[10px] font-bold text-gray-400 uppercase">Filtrer Batch:</span>
                   <select value={selectedBatchFilter} onChange={e => setSelectedBatchFilter(e.target.value)} className="border p-1.5 text-xs rounded-lg bg-gray-50 font-bold">
@@ -471,7 +484,7 @@ export default function AdminApp() {
                       <th className="p-2.5">Batch</th>
                       <th className="p-2.5">Achat (Cost)</th>
                       <th className="p-2.5">Vente (Price)</th>
-                      <th className="p-2.5 text-center">En Stock</th>
+                      <th className="p-2.5 text-center">Stock Actuel</th>
                       <th className="p-2.5 text-center">Actions</th>
                     </tr>
                   </thead>
@@ -514,11 +527,9 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* TAB 2: CUSTOMER LEDGER WITH MULTI-ITEM CART (HOLDER) */}
+        {/* TAB 2: CUSTOMER LEDGER WITH MULTI-ITEM CART */}
         {activeTab === 'customers' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* RECORD NEW SALE WITH CART / HOLDER */}
             <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit space-y-4">
               <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 pb-2 border-b">Enregistrer une Vente (Panier Multi-Articles)</h3>
               
@@ -539,7 +550,6 @@ export default function AdminApp() {
                   </div>
                 )}
 
-                {/* HOLDER / CART BUILDER */}
                 <div className="bg-gray-50 p-3.5 rounded-xl border space-y-3">
                   <label className="text-[10px] text-gray-500 font-bold uppercase block">Ajouter des articles au panier</label>
                   <div className="grid grid-cols-1 gap-2">
@@ -559,7 +569,6 @@ export default function AdminApp() {
                     </div>
                   </div>
 
-                  {/* CART ITEMS TABLE (Editable quantities, editable prices, removable) */}
                   {cartItems.length > 0 ? (
                     <div className="mt-3 space-y-2">
                       <div className="bg-white rounded-lg border overflow-hidden">
@@ -579,21 +588,10 @@ export default function AdminApp() {
                                   {item.name} <span className="text-[9px] text-orange-600 block">({item.batch})</span>
                                 </td>
                                 <td className="p-2 text-center">
-                                  <input 
-                                    type="number" 
-                                    min="1" 
-                                    value={item.qty} 
-                                    onChange={(e) => handleUpdateCartItemQty(index, e.target.value)} 
-                                    className="w-14 border text-center p-1 rounded font-bold text-xs" 
-                                  />
+                                  <input type="number" min="1" value={item.qty} onChange={(e) => handleUpdateCartItemQty(index, e.target.value)} className="w-14 border text-center p-1 rounded font-bold text-xs" />
                                 </td>
                                 <td className="p-2 text-right">
-                                  <input 
-                                    type="number" 
-                                    value={item.price} 
-                                    onChange={(e) => handleUpdateCartItemPrice(index, e.target.value)} 
-                                    className="w-24 border text-right p-1 rounded font-bold text-xs" 
-                                  />
+                                  <input type="number" value={item.price} onChange={(e) => handleUpdateCartItemPrice(index, e.target.value)} className="w-24 border text-right p-1 rounded font-bold text-xs" />
                                 </td>
                                 <td className="p-2 text-center">
                                   <button type="button" onClick={() => handleRemoveFromCart(index)} className="text-red-500 hover:text-red-700 p-1" title="Supprimer">
@@ -616,7 +614,6 @@ export default function AdminApp() {
                   <input type="number" placeholder="Payé mtn" value={ledgerForm.initialPaid} onChange={e => setLedgerForm({...ledgerForm, initialPaid: e.target.value})} className="w-full border p-2.5 text-xs rounded-lg" required />
                 </div>
 
-                {/* LIVE CALCULATION DISPLAY */}
                 {cartItems.length > 0 && (
                   <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-xs space-y-1">
                     <div className="flex justify-between text-gray-600">
@@ -640,7 +637,6 @@ export default function AdminApp() {
               </form>
             </div>
 
-            {/* CUSTOMER DEBT BOARD & EDIT MODAL */}
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
                 <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 mb-4 pb-2 border-b">Balances Clients & Historique des Achats</h3>
@@ -705,7 +701,7 @@ export default function AdminApp() {
                   ))}
                   {customers.length === 0 && (
                     <div className="col-span-full text-center py-12 text-gray-400 text-xs bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                      Aucun client enregistré pour le moment. Utilisez le formulaire à gauche pour enregistrer votre premier client ou effectuer une vente.
+                      Aucun client enregistré pour le moment.
                     </div>
                   )}
                 </div>
@@ -715,7 +711,7 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* TAB 3: FRONT-PAGE STOREFRONT PREVIEW */}
+        {/* TAB 3: STOREFRONT PREVIEW */}
         {activeTab === 'storefront' && (
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b gap-2">
@@ -749,7 +745,7 @@ export default function AdminApp() {
               ))}
               {frontPageProducts.length === 0 && (
                 <div className="col-span-full text-center py-12 text-gray-400 text-xs">
-                  Aucun produit en stock pour le moment (tous les articles ont une quantité de 0).
+                  Aucun produit en stock pour le moment.
                 </div>
               )}
             </div>
