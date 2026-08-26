@@ -314,16 +314,19 @@ export default function AdminApp() {
     }, 0);
   };
 
-  // --- DASHBOARD FINANCIAL CALCULATIONS ---
+  // --- DASHBOARD FINANCIAL CALCULATIONS (CONSTANT & SALES) ---
   
-  // 1. Total Capital Investi (Achats) -> Constant based on initial purchase volume
+  // 1. Total Capital Investi (Achats) -> Constant based on initial purchase volume (cost_price * initial_quantity)
   const totalInventoryCost = products.reduce((acc, p) => {
     const initialQty = p.initial_quantity !== undefined && p.initial_quantity !== null ? p.initial_quantity : p.quantity;
     return acc + ((parseFloat(p.cost_price) || 0) * (parseInt(initialQty) || 0));
   }, 0);
 
-  // 2. Valeur Potentielle Stock
-  const totalPotentialRetail = products.reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
+  // 2. Total Prix de Vente Initial -> Constant based on initial purchase volume (selling_price * initial_quantity)
+  const totalConstantRetailValue = products.reduce((acc, p) => {
+    const initialQty = p.initial_quantity !== undefined && p.initial_quantity !== null ? p.initial_quantity : p.quantity;
+    return acc + ((parseFloat(p.price) || 0) * (parseInt(initialQty) || 0));
+  }, 0);
 
   // 3. Coût Marchandises Vendues (COGS)
   const totalGoodsSoldCost = products.reduce((acc, p) => {
@@ -336,7 +339,7 @@ export default function AdminApp() {
     return acc + c.history.reduce((hAcc, h) => hAcc + (h.total || 0), 0);
   }, 0);
 
-  // 5. Total Dettes Clients
+  // 5. Total Dettes Clients Restantes
   const totalOutstandingDebt = customers.reduce((acc, c) => acc + (c.totalDebt || 0), 0);
 
   const uniqueBatches = ['ALL', ...new Set(products.map(p => p.batch_reference).filter(Boolean))];
@@ -396,12 +399,12 @@ export default function AdminApp() {
         {/* FINANCIAL METRICS DASHBOARD OVERVIEW */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Capital Investi (Achats)</p>
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Capital Investi (Constant)</p>
             <p className="text-base sm:text-xl font-black text-gray-900 mt-1">{totalInventoryCost.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Valeur Potentielle Stock</p>
-            <p className="text-base sm:text-xl font-black text-orange-600 mt-1">{totalPotentialRetail.toLocaleString()} FCFA</p>
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Prix de Vente (Constant)</p>
+            <p className="text-base sm:text-xl font-black text-orange-600 mt-1">{totalConstantRetailValue.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
             <p className="text-[10px] font-extrabold uppercase text-gray-400">Coût Marchandises Vendues</p>
