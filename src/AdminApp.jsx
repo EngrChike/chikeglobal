@@ -25,8 +25,9 @@ export default function AdminApp() {
   const [uploading, setUploading] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
 
-  // Customer Ledger & Multi-Item Cart states
+  // Customer Ledger (Stored in Supabase database)
   const [customers, setCustomers] = useState([]);
+
   const [ledgerForm, setLedgerForm] = useState({ 
     customerId: '', 
     newName: '', 
@@ -34,16 +35,29 @@ export default function AdminApp() {
     initialPaid: '' 
   });
   
-  // Cart Holder States
-  const [cartItems, setCartItems] = useState([]);
+  // Cart Holder States (Persistent via localStorage for active session convenience)
+  const [cartItems, setCartItems] = useState(() => {
+    try {
+      const savedCart = localStorage.getItem('akuDonCart');
+      return savedCart ? JSON.parse(savedCart) : [];
+    } catch (error) {
+      return [];
+    }
+  });
   const [cartProductId, setCartProductId] = useState('');
   const [cartQty, setCartQty] = useState('1');
 
   const [paymentForm, setPaymentForm] = useState({ amount: '', customerId: null });
   const [editingCustomer, setEditingCustomer] = useState(null);
 
+  // Auto-save cart items to local storage so active carts don't vanish on accidental refresh
+  useEffect(() => {
+    localStorage.setItem('akuDonCart', JSON.stringify(cartItems));
+  }, [cartItems]);
+
   useEffect(() => {
     fetchProducts();
+    fetchCustomersFromSupabase();
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
     return () => subscription.unsubscribe();
@@ -54,7 +68,31 @@ export default function AdminApp() {
       const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
       if (!error && data) setProducts(data);
     } catch (err) {
-      console.error("Erreur: ", err);
+      console.error("Erreur produits: ", err);
+    }
+  };
+
+  const fetchCustomersFromSupabase = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('*, customer_history(*)')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      if (data) {
+        // Map Supabase relational structure to application format
+        const formatted = data.map(c => ({
+          id: c.id,
+          name: c.name,
+          phone: c.phone,
+          totalDebt: c.total_debt || 0,
+          history: c.customer_history ? c.customer_history.sort((a, b) => b.id - a.id) : []
+        }));
+        setCustomers(formatted);
+      }
+    } catch (err) {
+      console.error("Erreur chargement clients Supabase:", err.message);
     }
   };
 
@@ -229,88 +267,137 @@ export default function AdminApp() {
       return;
     }
 
-    const iPaid = parseFloat(ledgerForm.initialPaid) || 0;
-    const balance = cartTotal - iPaid;
-    const goodsDescription = cartItems.map(item => `${item.qty}x ${item.name} (${item.batch})`).join(', ');
+    try {
+      const iPaid = parseFloat(ledgerForm.initialPaid) || 0;
+      const balance = cartTotal - iPaid;
+      const goodsDescription = cartItems.map(item => `${item.qty}x ${item.name} (${item.batch})`).join(', ');
+      const currentDate = new Date().toISOString().split('T')[0];
 
-    const newTransaction = {
-      date: new Date().toISOString().split('T')[0],
-      batch: cartItems.length === 1 ? cartItems[0].batch : 'MULTI-BATCH',
-      productId: cartItems.length === 1 ? cartItems[0].productId : null,
-      qty: cartItems.reduce((sum, item) => sum + item.qty, 0),
-      goods: goodsDescription,
-      total: cartTotal,
-      paid: iPaid,
-      items: cartItems
-    };
+      let targetCustomerId = ledgerForm.customerId;
 
-    // Deduct current stock automatically from Supabase for all items in cart
-    for (const item of cartItems) {
-      if (item.productId) {
-        const selectedProd = products.find(p => p.id === item.productId);
-        if (selectedProd) {
-          const newStock = Math.max(0, selectedProd.quantity - item.qty);
-          await handleUpdateStockVolume(selectedProd.id, newStock);
+      // 1. If new customer, create in Supabase first
+      if (ledgerForm.customerId === 'new') {
+        const { data: newCustData, error: custErr } = await supabase.from('customers').insert([{
+          name: ledgerForm.newName.trim(),
+          phone: ledgerForm.newPhone.trim(),
+          total_debt: balance
+        }]).select().single();
+
+        if (custErr) throw custErr;
+        targetCustomerId = newCustData.id;
+      } else {
+        // Update existing customer total debt
+        const existingCust = customers.find(c => c.id === parseInt(ledgerForm.customerId));
+        const newTotalDebt = (existingCust ? existingCust.totalDebt : 0) + balance;
+        
+        const { error: updateErr } = await supabase.from('customers').update({
+          total_debt: newTotalDebt
+        }).eq('id', targetCustomerId);
+
+        if (updateErr) throw updateErr;
+      }
+
+      // 2. Insert transaction history into Supabase
+      const { error: histErr } = await supabase.from('customer_history').insert([{
+        customer_id: targetCustomerId,
+        date: currentDate,
+        batch: cartItems.length === 1 ? cartItems[0].batch : 'MULTI-BATCH',
+        product_id: cartItems.length === 1 ? cartItems[0].productId : null,
+        qty: cartItems.reduce((sum, item) => sum + item.qty, 0),
+        goods: goodsDescription,
+        total: cartTotal,
+        paid: iPaid,
+        type: 'Sale',
+        items: cartItems
+      }]);
+
+      if (histErr) throw histErr;
+
+      // 3. Deduct stock automatically from Supabase for all items in cart
+      for (const item of cartItems) {
+        if (item.productId) {
+          const selectedProd = products.find(p => p.id === item.productId);
+          if (selectedProd) {
+            const newStock = Math.max(0, selectedProd.quantity - item.qty);
+            await handleUpdateStockVolume(selectedProd.id, newStock);
+          }
         }
       }
-    }
 
-    if (ledgerForm.customerId === 'new') {
-      const newCustomer = {
-        id: Date.now(),
-        name: ledgerForm.newName,
-        phone: ledgerForm.newPhone,
-        totalDebt: balance,
-        history: [newTransaction]
-      };
-      setCustomers([...customers, newCustomer]);
-    } else {
-      setCustomers(customers.map(c => 
-        c.id === parseInt(ledgerForm.customerId) 
-        ? { ...c, totalDebt: c.totalDebt + balance, history: [...c.history, newTransaction] } 
-        : c
-      ));
+      setLedgerForm({ customerId: '', newName: '', newPhone: '', initialPaid: '' });
+      setCartItems([]);
+      localStorage.removeItem('akuDonCart');
+      
+      await fetchCustomersFromSupabase();
+      alert('Vente enregistrée dans la base de données Supabase, calculs effectués et stocks réduits !');
+    } catch (err) {
+      alert(`Erreur lors de l'enregistrement de la vente: ${err.message}`);
     }
-
-    setLedgerForm({ customerId: '', newName: '', newPhone: '', initialPaid: '' });
-    setCartItems([]);
-    alert('Vente enregistrée avec succès, calcul effectué et stocks réduits !');
   };
 
-  const handleRecordPayment = (e) => {
+  const handleRecordPayment = async (e, customerId, currentDebt, customerHistory) => {
     e.preventDefault();
     const payAmt = parseFloat(paymentForm.amount) || 0;
-    setCustomers(customers.map(c => 
-      c.id === paymentForm.customerId 
-      ? { 
-          ...c, 
-          totalDebt: c.totalDebt - payAmt, 
-          history: [...c.history, { date: new Date().toLocaleString(), type: 'Payment', paid: payAmt, goods: 'Debt Reconciliation', total: 0 }]
-        } 
-      : c
-    ));
-    setPaymentForm({ amount: '', customerId: null });
-    alert('Paiement enregistré avec succès !');
+    if (payAmt <= 0) return;
+
+    try {
+      const newDebt = currentDebt - payAmt;
+
+      // Update customer debt in Supabase
+      const { error: updateErr } = await supabase.from('customers').update({
+        total_debt: newDebt
+      }).eq('id', customerId);
+
+      if (updateErr) throw updateErr;
+
+      // Add payment record to history table in Supabase
+      const { error: histErr } = await supabase.from('customer_history').insert([{
+        customer_id: customerId,
+        date: new Date().toLocaleString(),
+        type: 'Payment',
+        paid: payAmt,
+        goods: 'Debt Reconciliation',
+        total: 0,
+        qty: 0,
+        items: []
+      }]);
+
+      if (histErr) throw histErr;
+
+      setPaymentForm({ amount: '', customerId: null });
+      await fetchCustomersFromSupabase();
+      alert('Paiement enregistré dans Supabase avec succès !');
+    } catch (err) {
+      alert(`Erreur de paiement: ${err.message}`);
+    }
   };
 
-  const handleSaveCustomerEdit = (e) => {
+  const handleSaveCustomerEdit = async (e) => {
     e.preventDefault();
     if (!editingCustomer) return;
-    setCustomers(customers.map(c => c.id === editingCustomer.id ? { ...c, name: editingCustomer.name, phone: editingCustomer.phone } : c));
-    setEditingCustomer(null);
-    alert('Informations client mises à jour !');
+    try {
+      const { error } = await supabase.from('customers').update({
+        name: editingCustomer.name.trim(),
+        phone: editingCustomer.phone.trim()
+      }).eq('id', editingCustomer.id);
+
+      if (error) throw error;
+
+      setEditingCustomer(null);
+      await fetchCustomersFromSupabase();
+      alert('Informations client mises à jour dans Supabase !');
+    } catch (err) {
+      alert(`Erreur mise à jour client: ${err.message}`);
+    }
   };
 
-  // Improved calculation to read inside multi-item carts correctly
   const getProductSoldQty = (productId) => {
     return customers.reduce((acc, c) => {
       return acc + c.history.reduce((hAcc, h) => {
-        // If transaction has multi-items saved, parse them
         if (h.items && Array.isArray(h.items)) {
           const item = h.items.find(i => i.productId === productId);
           return hAcc + (item ? item.qty : 0);
         } else {
-          // Fallback for older transactions
           if (h.productId === productId) {
             return hAcc + (h.qty || 1);
           }
@@ -321,42 +408,33 @@ export default function AdminApp() {
   };
 
   // --- DASHBOARD FINANCIAL CALCULATIONS (6 BOXES) ---
-  
-  // Helper to guarantee initial quantity stays strictly constant regardless of DB state
   const getTrueInitialQty = (p) => {
     if (p.initial_quantity !== undefined && p.initial_quantity !== null && p.initial_quantity !== '') {
       return parseInt(p.initial_quantity);
     }
-    // Dynamic Fallback: Current Stock + Sold Stock = Original Amount (This mathematically prevents dropping)
     const soldQty = getProductSoldQty(p.id);
     return (parseInt(p.quantity) || 0) + soldQty;
   };
 
-  // 1. Total Achat Initial (Constant) -> Cost Price * Guaranteed Initial Quantity
   const totalInventoryCost = products.reduce((acc, p) => {
     return acc + ((parseFloat(p.cost_price) || 0) * getTrueInitialQty(p));
   }, 0);
 
-  // 2. Total Vente Initiale (Constant) -> Selling Price * Guaranteed Initial Quantity
   const totalExpectedRevenue = products.reduce((acc, p) => {
     return acc + ((parseFloat(p.price) || 0) * getTrueInitialQty(p));
   }, 0);
 
-  // 3. Valeur Stock Actuel (Variable) -> Selling Price * Current Remaining Stock
   const totalPotentialRetail = products.reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
 
-  // 4. Coût Marchandises Vendues (COGS) -> Cost Price * Sold Qty
   const totalGoodsSoldCost = products.reduce((acc, p) => {
     const soldQty = getProductSoldQty(p.id);
     return acc + ((parseFloat(p.cost_price) || 0) * soldQty);
   }, 0);
 
-  // 5. Total Ventes (Revenue) -> Accumulates all customer purchase totals
   const totalSalesRevenue = customers.reduce((acc, c) => {
     return acc + c.history.reduce((hAcc, h) => hAcc + (h.total || 0), 0);
   }, 0);
 
-  // 6. Total Dettes Clients
   const totalOutstandingDebt = customers.reduce((acc, c) => acc + (c.totalDebt || 0), 0);
 
   const uniqueBatches = ['ALL', ...new Set(products.map(p => p.batch_reference).filter(Boolean))];
@@ -551,7 +629,7 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* TAB 2: CUSTOMER LEDGER WITH MULTI-ITEM CART */}
+        {/* TAB 2: SUPABASE CUSTOMER LEDGER WITH MULTI-ITEM CART */}
         {activeTab === 'customers' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit space-y-4">
@@ -559,7 +637,7 @@ export default function AdminApp() {
               
               <form onSubmit={handleFinalizeSale} className="space-y-4">
                 <div>
-                  <label className="text-[10px] text-gray-400 font-bold block mb-1">Sélectionner le Client</label>
+                  <label className="text-[10px] text-gray-400 font-bold block mb-1">Sélectionner le Client (Supabase)</label>
                   <select value={ledgerForm.customerId} onChange={e => setLedgerForm({...ledgerForm, customerId: e.target.value})} className="w-full border p-2.5 text-xs rounded-lg" required>
                     <option value="">-- Choisir un Client --</option>
                     <option value="new">+ Enregistrer un Nouveau Client</option>
@@ -656,14 +734,14 @@ export default function AdminApp() {
                 )}
                 
                 <button type="submit" disabled={cartItems.length === 0} className="w-full bg-black hover:bg-gray-800 disabled:bg-gray-300 text-white text-xs py-3 rounded-lg font-bold uppercase tracking-wider">
-                  Terminer & Enregistrer la Vente
+                  Terminer & Enregistrer dans Supabase
                 </button>
               </form>
             </div>
 
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 mb-4 pb-2 border-b">Balances Clients & Historique des Achats</h3>
+                <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 mb-4 pb-2 border-b">Balances Clients & Historique (Supabase Database)</h3>
                 
                 {editingCustomer && (
                   <form onSubmit={handleSaveCustomerEdit} className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-xl space-y-3">
@@ -699,7 +777,7 @@ export default function AdminApp() {
                         </div>
                         
                         {c.totalDebt > 0 && (
-                          <form onSubmit={handleRecordPayment} className="mt-3 flex space-x-2">
+                          <form onSubmit={(e) => handleRecordPayment(e, c.id, c.totalDebt, c.history)} className="mt-3 flex space-x-2">
                             <input type="number" placeholder="Montant du paiement" value={paymentForm.customerId === c.id ? paymentForm.amount : ''} onChange={e => setPaymentForm({ amount: e.target.value, customerId: c.id })} className="w-full border p-1.5 text-xs rounded bg-white" required />
                             <button type="submit" className="bg-green-600 text-white text-[10px] px-3 rounded font-bold whitespace-nowrap">Régler Dette</button>
                           </form>
@@ -707,7 +785,7 @@ export default function AdminApp() {
                       </div>
 
                       <div className="pt-2 border-t">
-                        <p className="text-[10px] font-bold text-gray-400 mb-1">HISTORIQUE DES TRANSACTIONS:</p>
+                        <p className="text-[10px] font-bold text-gray-400 mb-1">HISTORIQUE SUPABASE:</p>
                         <ul className="text-[10px] space-y-1.5 text-gray-600 max-h-32 overflow-y-auto">
                           {c.history.map((h, i) => (
                             <li key={i} className="bg-white p-2 rounded border border-gray-100 flex justify-between items-center">
@@ -725,7 +803,7 @@ export default function AdminApp() {
                   ))}
                   {customers.length === 0 && (
                     <div className="col-span-full text-center py-12 text-gray-400 text-xs bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                      Aucun client enregistré pour le moment.
+                      Aucun client enregistré dans Supabase pour le moment.
                     </div>
                   )}
                 </div>
