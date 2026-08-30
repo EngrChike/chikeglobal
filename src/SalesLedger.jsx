@@ -12,12 +12,15 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
     }
   });
 
+  // Independent Sales History State
+  const [salesHistory, setSalesHistory] = useState([]);
+
   // Adding Item State
   const [cartProductId, setCartProductId] = useState('');
   const [cartQty, setCartQty] = useState('1');
   const [customPrice, setCustomPrice] = useState('');
 
-  // Form State - Default customer set to 'walkin' (Client de passage)
+  // Form State
   const [ledgerForm, setLedgerForm] = useState({ 
     customerId: 'walkin', 
     newName: '', 
@@ -39,6 +42,26 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
   // State for collapsible month folders (Current month expanded by default)
   const [expandedMonths, setExpandedMonths] = useState({ [currentMonthKey]: true });
 
+  // Fetch all sales directly from customer_history table
+  const fetchSalesHistory = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('customer_history')
+        .select('*')
+        .order('id', { ascending: false });
+
+      if (!error && data) {
+        setSalesHistory(data);
+      }
+    } catch (err) {
+      console.error('Error fetching sales history:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchSalesHistory();
+  }, []);
+
   // Sync cart to local storage
   useEffect(() => {
     localStorage.setItem('akuDonCart', JSON.stringify(cartItems));
@@ -51,7 +74,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
     }));
   };
 
-  // Update default custom price field when product selection changes
   const handleProductSelect = (e) => {
     const prodId = e.target.value;
     setCartProductId(prodId);
@@ -65,7 +87,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
     }
   };
 
-  // Add Item to Staging Accumulator
   const handleAddToCart = () => {
     if (!cartProductId) return;
     const prod = products.find(p => String(p.id) === String(cartProductId));
@@ -122,7 +143,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
   const paidAmount = ledgerForm.initialPaid !== '' ? parseFloat(ledgerForm.initialPaid) : cartTotal;
   const remainingDebt = Math.max(0, cartTotal - paidAmount);
 
-  // Finalize Sales & Save to Database
   const handleFinalizeSale = async (e) => {
     e.preventDefault();
     if (cartItems.length === 0) {
@@ -134,12 +154,11 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
       const balance = remainingDebt;
       const goodsDescription = cartItems.map(item => `${item.qty}x ${item.name} (${item.batch}) @ ${item.price} FCFA`).join(', ');
       
-      // Capture Exact Date, Time and Month Key
       const now = new Date();
-      const currentDate = now.toLocaleDateString('fr-FR'); // Ex: 30/08/2026
-      const currentTime = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); // Ex: 14:35
+      const currentDate = now.toLocaleDateString('fr-FR');
+      const currentTime = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
       const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const monthLabel = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }); // Ex: août 2026
+      const monthLabel = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 
       let targetCustomerId = null;
       let customerDisplayName = 'Client de Passage';
@@ -170,25 +189,29 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
         }
       }
 
-      // Record History Entry with Time and Month grouping tags
-      const { error: histErr } = await supabase.from('customer_history').insert([{
+      // Record Sale Payload
+      const salePayload = {
         customer_id: targetCustomerId,
-        customer_name: customerDisplayName,
         date: currentDate,
-        time: currentTime,
-        month_key: monthKey,
-        month_label: monthLabel,
+        goods: goodsDescription,
         batch: cartItems.length === 1 ? cartItems[0].batch : 'MULTI-BATCH',
         product_id: cartItems.length === 1 ? cartItems[0].productId : null,
         qty: cartItems.reduce((sum, item) => sum + item.qty, 0),
-        goods: goodsDescription,
         total: cartTotal,
         paid: paidAmount,
         type: 'Sale',
-        items: cartItems,
-        created_at: now.toISOString()
-      }]);
+        items: cartItems
+      };
 
+      // Safely attach extra metadata if DB columns exist
+      try {
+        salePayload.customer_name = customerDisplayName;
+        salePayload.time = currentTime;
+        salePayload.month_key = monthKey;
+        salePayload.month_label = monthLabel;
+      } catch (e) {}
+
+      const { error: histErr } = await supabase.from('customer_history').insert([salePayload]);
       if (histErr) throw histErr;
 
       // Update Stock Levels
@@ -211,73 +234,78 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
       
       await fetchProducts();
       await fetchCustomers();
+      await fetchSalesHistory();
       alert('Vente enregistrée avec succès !');
     } catch (err) {
       alert(`Erreur lors de l'enregistrement: ${err.message}`);
     }
   };
 
-  // Consolidate All Sales History from Customers & Walk-ins
-  const allSalesHistory = useMemo(() => {
-    const list = [];
-    customers.forEach(c => {
-      (c.history || []).forEach(h => {
-        list.push({
-          ...h,
-          customerName: c.name || 'Client de Passage',
-          customerId: c.id
-        });
-      });
-    });
+  // Helper to resolve Month Key & Label dynamically
+  const getMonthGroup = (item) => {
+    if (item.month_key && item.month_label) {
+      return { key: item.month_key, label: item.month_label };
+    }
+    
+    let dateObj = new Date(item.created_at || item.date);
+    if (isNaN(dateObj.getTime()) && typeof item.date === 'string') {
+      const parts = item.date.split(/[\/\-]/);
+      if (parts.length === 3 && parts[2].length === 4) {
+        dateObj = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+      }
+    }
 
-    // Filter by Search Term
-    return list.filter(item => {
+    if (!isNaN(dateObj.getTime())) {
+      const key = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+      const label = dateObj.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+      return { key, label };
+    }
+
+    return { key: currentMonthKey, label: 'Mois En Cours' };
+  };
+
+  // Process & Filter Sales History
+  const filteredSales = useMemo(() => {
+    return salesHistory.map(item => {
+      const cust = customers.find(c => String(c.id) === String(item.customer_id));
+      return {
+        ...item,
+        displayCustomer: item.customer_name || (cust ? cust.name : 'Client de Passage')
+      };
+    }).filter(item => {
       if (!searchTerm) return true;
       const term = searchTerm.toLowerCase();
       return (
         (item.goods && item.goods.toLowerCase().includes(term)) ||
-        (item.customerName && item.customerName.toLowerCase().includes(term)) ||
+        (item.displayCustomer && item.displayCustomer.toLowerCase().includes(term)) ||
         (item.batch && item.batch.toLowerCase().includes(term)) ||
         (item.date && item.date.includes(term)) ||
         (item.time && item.time.includes(term))
       );
-    }).sort((a, b) => new Date(b.created_at || b.date) - new Date(a.created_at || a.date));
-  }, [customers, searchTerm]);
+    });
+  }, [salesHistory, customers, searchTerm]);
 
-  // Group History items into Monthly Folders
+  // Group History items into Folders by Month
   const groupedSalesByMonth = useMemo(() => {
     const groups = {};
-    allSalesHistory.forEach(item => {
-      // Fallback month key from date if month_key is not set
-      let mKey = item.month_key;
-      let mLabel = item.month_label;
+    filteredSales.forEach(item => {
+      const { key, label } = getMonthGroup(item);
 
-      if (!mKey) {
-        const itemDate = new Date(item.created_at || item.date);
-        if (!isNaN(itemDate)) {
-          mKey = `${itemDate.getFullYear()}-${String(itemDate.getMonth() + 1).padStart(2, '0')}`;
-          mLabel = itemDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-        } else {
-          mKey = 'Anciennes-Ventes';
-          mLabel = 'Archives Ventes';
-        }
-      }
-
-      if (!groups[mKey]) {
-        groups[mKey] = {
-          label: mLabel || mKey,
+      if (!groups[key]) {
+        groups[key] = {
+          label: label,
           items: [],
           totalSales: 0,
           totalPaid: 0
         };
       }
-      groups[mKey].items.push(item);
-      groups[mKey].totalSales += item.total || 0;
-      groups[mKey].totalPaid += item.paid || 0;
+      groups[key].items.push(item);
+      groups[key].totalSales += item.total || 0;
+      groups[key].totalPaid += item.paid || 0;
     });
 
     return groups;
-  }, [allSalesHistory]);
+  }, [filteredSales]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -288,7 +316,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
         </h3>
         
         <form onSubmit={handleFinalizeSale} className="space-y-4">
-          {/* Customer Selection - Defaulted to Walk-in */}
           <div>
             <label className="text-[10px] text-gray-400 font-bold block mb-1">Type de Client</label>
             <select 
@@ -325,7 +352,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
             </div>
           )}
 
-          {/* Product Staging Accumulator Box */}
           <div className="bg-gray-50 p-3.5 rounded-xl border space-y-3">
             <label className="text-[10px] text-gray-500 font-bold uppercase block">
               Sélectionner les articles à ajouter
@@ -378,7 +404,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
               </button>
             </div>
 
-            {/* Accumulated Items Table */}
             {cartItems.length > 0 ? (
               <div className="mt-3 space-y-2">
                 <p className="text-[10px] font-bold text-gray-400 uppercase">Articles du Panier:</p>
@@ -475,13 +500,11 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
       <div className="lg:col-span-2 space-y-4">
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-4">
           
-          {/* Header & Hierarchy Search Bar */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b">
             <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700">
               Historique des Ventes par Mois
             </h3>
 
-            {/* Search Input */}
             <div className="relative w-full md:w-72">
               <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
               <input 
@@ -494,7 +517,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
             </div>
           </div>
 
-          {/* Monthly Folders Container */}
           <div className="space-y-3">
             {Object.keys(groupedSalesByMonth).length > 0 ? (
               Object.keys(groupedSalesByMonth).map(monthKey => {
@@ -504,7 +526,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
                 return (
                   <div key={monthKey} className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
                     
-                    {/* Monthly Folder Accordion Header */}
                     <button 
                       type="button" 
                       onClick={() => toggleMonth(monthKey)}
@@ -539,13 +560,10 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
                       </div>
                     </button>
 
-                    {/* Folder Content: Sales Items List */}
                     {isOpen && (
                       <div className="p-3 bg-white space-y-2 max-h-96 overflow-y-auto">
                         {group.items.map((sale, idx) => (
                           <div key={idx} className="p-3 rounded-lg border border-gray-100 bg-gray-50/50 hover:bg-white hover:border-orange-200 transition-all text-xs space-y-1.5">
-                            
-                            {/* Line 1: Date, Time & Customer */}
                             <div className="flex justify-between items-center text-gray-500 text-[10px]">
                               <div className="flex items-center space-x-3">
                                 <span className="flex items-center font-bold text-gray-700">
@@ -559,16 +577,14 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
                               </div>
                               <span className="flex items-center font-bold text-gray-800 bg-gray-200 px-2 py-0.5 rounded">
                                 <User className="w-3 h-3 mr-1" />
-                                {sale.customerName || sale.customer_name || 'Client de Passage'}
+                                {sale.displayCustomer}
                               </span>
                             </div>
 
-                            {/* Line 2: Goods & Batch Details */}
                             <div className="font-semibold text-gray-800 pl-1">
                               {sale.goods}
                             </div>
 
-                            {/* Line 3: Financial Summary */}
                             <div className="flex justify-between items-center pt-1 border-t border-gray-100 text-[11px]">
                               <span className="text-gray-400 text-[10px]">
                                 Lot: <strong className="text-gray-600">{sale.batch || 'N/A'}</strong>
