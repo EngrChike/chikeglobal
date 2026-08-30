@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './utils/supabaseClient';
-import { ShieldCheck, Trash2, Pencil, LogOut, Users, Package, Phone, CheckCircle, X, DollarSign, TrendingUp, Layers, Eye, Archive, RotateCcw } from 'lucide-react';
+import { Package, Users, Eye, LogOut, Pencil, Archive, RotateCcw, X, Layers } from 'lucide-react';
+import SalesLedger from './SalesLedger';
 
 export default function AdminApp() {
   const [session, setSession] = useState(null);
@@ -29,32 +30,6 @@ export default function AdminApp() {
   // Customer Ledger
   const [customers, setCustomers] = useState([]);
 
-  const [ledgerForm, setLedgerForm] = useState({ 
-    customerId: '', 
-    newName: '', 
-    newPhone: '', 
-    initialPaid: '' 
-  });
-  
-  // Cart Holder States
-  const [cartItems, setCartItems] = useState(() => {
-    try {
-      const savedCart = localStorage.getItem('akuDonCart');
-      return savedCart ? JSON.parse(savedCart) : [];
-    } catch (error) {
-      return [];
-    }
-  });
-  const [cartProductId, setCartProductId] = useState('');
-  const [cartQty, setCartQty] = useState('1');
-
-  const [paymentForm, setPaymentForm] = useState({ amount: '', customerId: null });
-  const [editingCustomer, setEditingCustomer] = useState(null);
-
-  useEffect(() => {
-    localStorage.setItem('akuDonCart', JSON.stringify(cartItems));
-  }, [cartItems]);
-
   useEffect(() => {
     fetchProducts();
     fetchCustomersFromSupabase();
@@ -65,7 +40,6 @@ export default function AdminApp() {
 
   const fetchProducts = async () => {
     try {
-      // Fetch all products including soft-deleted ones for retained financial metrics
       const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
       if (!error && data) setProducts(data);
     } catch (err) {
@@ -205,7 +179,6 @@ export default function AdminApp() {
     if (!error) setProducts(prev => prev.map(p => String(p.id) === String(id) ? { ...p, quantity: parsedVolume, stock_status: parsedVolume > 0 } : p));
   };
 
-  // SOFT-DELETE ARCHIVING FUNCTION
   const handleArchiveProduct = async (id, archiveState = true) => {
     const confirmMsg = archiveState 
       ? 'Voulez-vous archiver ce produit ? Il conservera ses données financières mais ne sera plus actif.' 
@@ -217,191 +190,6 @@ export default function AdminApp() {
       setProducts(prev => prev.map(p => String(p.id) === String(id) ? { ...p, is_archived: archiveState } : p));
     } else {
       alert(`Erreur d'archivage: ${error.message}`);
-    }
-  };
-
-  // --- CART / HOLDER FUNCTIONS ---
-  const handleAddToCart = () => {
-    if (!cartProductId) return;
-    const prod = products.find(p => String(p.id) === String(cartProductId));
-    if (!prod || prod.is_archived) return;
-    const qty = parseInt(cartQty) || 1;
-
-    if (qty > prod.quantity) {
-      alert(`Quantité sélectionnée supérieure au stock disponible (${prod.quantity}).`);
-      return;
-    }
-
-    const existingIndex = cartItems.findIndex(item => String(item.productId) === String(prod.id));
-    if (existingIndex > -1) {
-      const updated = [...cartItems];
-      updated[existingIndex].qty += qty;
-      setCartItems(updated);
-    } else {
-      setCartItems([...cartItems, {
-        productId: prod.id,
-        name: prod.name,
-        batch: prod.batch_reference || 'N/A',
-        price: prod.price,
-        qty: qty
-      }]);
-    }
-    setCartProductId('');
-    setCartQty('1');
-  };
-
-  const handleRemoveFromCart = (index) => {
-    setCartItems(cartItems.filter((_, i) => i !== index));
-  };
-
-  const handleUpdateCartItemQty = (index, newQty) => {
-    const qty = parseInt(newQty) || 0;
-    const updated = [...cartItems];
-    updated[index].qty = qty;
-    setCartItems(updated);
-  };
-
-  const handleUpdateCartItemPrice = (index, newPrice) => {
-    const price = parseFloat(newPrice) || 0;
-    const updated = [...cartItems];
-    updated[index].price = price;
-    setCartItems(updated);
-  };
-
-  const cartTotal = cartItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  const paidAmount = parseFloat(ledgerForm.initialPaid) || 0;
-  const remainingDebt = Math.max(0, cartTotal - paidAmount);
-
-  const handleFinalizeSale = async (e) => {
-    e.preventDefault();
-    if (cartItems.length === 0) {
-      alert("Veuillez ajouter au moins un article au panier.");
-      return;
-    }
-    if (!ledgerForm.customerId) {
-      alert("Veuillez sélectionner un client.");
-      return;
-    }
-
-    try {
-      const balance = remainingDebt;
-      const goodsDescription = cartItems.map(item => `${item.qty}x ${item.name} (${item.batch})`).join(', ');
-      const currentDate = new Date().toISOString().split('T')[0];
-
-      let targetCustomerId = ledgerForm.customerId;
-
-      if (ledgerForm.customerId === 'new') {
-        const { data: newCustData, error: custErr } = await supabase.from('customers').insert([{
-          name: ledgerForm.newName.trim(),
-          phone: ledgerForm.newPhone.trim(),
-          total_debt: balance
-        }]).select().single();
-
-        if (custErr) throw custErr;
-        targetCustomerId = newCustData.id;
-      } else {
-        const existingCust = customers.find(c => String(c.id) === String(ledgerForm.customerId));
-        const currentDebt = existingCust ? parseFloat(existingCust.totalDebt) || 0 : 0;
-        const newTotalDebt = currentDebt + balance;
-        
-        const { error: updateErr } = await supabase.from('customers').update({
-          total_debt: newTotalDebt
-        }).eq('id', targetCustomerId);
-
-        if (updateErr) throw updateErr;
-      }
-
-      const { error: histErr } = await supabase.from('customer_history').insert([{
-        customer_id: targetCustomerId,
-        date: currentDate,
-        batch: cartItems.length === 1 ? cartItems[0].batch : 'MULTI-BATCH',
-        product_id: cartItems.length === 1 ? cartItems[0].productId : null,
-        qty: cartItems.reduce((sum, item) => sum + item.qty, 0),
-        goods: goodsDescription,
-        total: cartTotal,
-        paid: paidAmount,
-        type: 'Sale',
-        items: cartItems
-      }]);
-
-      if (histErr) throw histErr;
-
-      for (const item of cartItems) {
-        if (item.productId) {
-          const selectedProd = products.find(p => String(p.id) === String(item.productId));
-          if (selectedProd) {
-            const newStock = Math.max(0, selectedProd.quantity - item.qty);
-            await supabase.from('products').update({ 
-              quantity: newStock, 
-              stock_status: newStock > 0 
-            }).eq('id', selectedProd.id);
-          }
-        }
-      }
-
-      setLedgerForm({ customerId: '', newName: '', newPhone: '', initialPaid: '' });
-      setCartItems([]);
-      localStorage.removeItem('akuDonCart');
-      
-      await fetchProducts();
-      await fetchCustomersFromSupabase();
-      alert('Vente enregistrée avec succès !');
-    } catch (err) {
-      alert(`Erreur lors de l'enregistrement: ${err.message}`);
-    }
-  };
-
-  const handleRecordPayment = async (e, customerId, currentDebt) => {
-    e.preventDefault();
-    const payAmt = parseFloat(paymentForm.amount) || 0;
-    if (payAmt <= 0) return;
-
-    try {
-      const newDebt = Math.max(0, currentDebt - payAmt);
-
-      const { error: updateErr } = await supabase.from('customers').update({
-        total_debt: newDebt
-      }).eq('id', customerId);
-
-      if (updateErr) throw updateErr;
-
-      const { error: histErr } = await supabase.from('customer_history').insert([{
-        customer_id: customerId,
-        date: new Date().toLocaleString(),
-        type: 'Payment',
-        paid: payAmt,
-        goods: 'Debt Reconciliation',
-        total: 0,
-        qty: 0,
-        items: []
-      }]);
-
-      if (histErr) throw histErr;
-
-      setPaymentForm({ amount: '', customerId: null });
-      await fetchCustomersFromSupabase();
-      alert('Paiement enregistré !');
-    } catch (err) {
-      alert(`Erreur de paiement: ${err.message}`);
-    }
-  };
-
-  const handleSaveCustomerEdit = async (e) => {
-    e.preventDefault();
-    if (!editingCustomer) return;
-    try {
-      const { error } = await supabase.from('customers').update({
-        name: editingCustomer.name.trim(),
-        phone: editingCustomer.phone.trim()
-      }).eq('id', editingCustomer.id);
-
-      if (error) throw error;
-
-      setEditingCustomer(null);
-      await fetchCustomersFromSupabase();
-      alert('Informations client mises à jour !');
-    } catch (err) {
-      alert(`Erreur mise à jour client: ${err.message}`);
     }
   };
 
@@ -421,7 +209,6 @@ export default function AdminApp() {
     }, 0);
   };
 
-  // --- RETENTION OF HISTORICAL FINANCIAL CALCULATIONS (Includes Archived Items) ---
   const getTrueInitialQty = (p) => {
     if (p.initial_quantity !== undefined && p.initial_quantity !== null && p.initial_quantity !== '') {
       return parseInt(p.initial_quantity);
@@ -430,34 +217,13 @@ export default function AdminApp() {
     return (parseInt(p.quantity) || 0) + soldQty;
   };
 
-  // 1. Total initial cost across ALL products (active + archived)
-  const totalInventoryCost = products.reduce((acc, p) => {
-    return acc + ((parseFloat(p.cost_price) || 0) * getTrueInitialQty(p));
-  }, 0);
-
-  // 2. Total expected revenue across ALL products (active + archived)
-  const totalExpectedRevenue = products.reduce((acc, p) => {
-    return acc + ((parseFloat(p.price) || 0) * getTrueInitialQty(p));
-  }, 0);
-
-  // 3. Current active retail value (Non-archived items with stock)
-  const totalPotentialRetail = products
-    .filter(p => !p.is_archived)
-    .reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
-
-  // 4. Total Cost of Goods Sold across historical logs
-  const totalGoodsSoldCost = products.reduce((acc, p) => {
-    const soldQty = getProductSoldQty(p.id);
-    return acc + ((parseFloat(p.cost_price) || 0) * soldQty);
-  }, 0);
-
-  const totalSalesRevenue = customers.reduce((acc, c) => {
-    return acc + (c.history || []).reduce((hAcc, h) => hAcc + (parseFloat(h.total) || 0), 0);
-  }, 0);
-
+  const totalInventoryCost = products.reduce((acc, p) => acc + ((parseFloat(p.cost_price) || 0) * getTrueInitialQty(p)), 0);
+  const totalExpectedRevenue = products.reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * getTrueInitialQty(p)), 0);
+  const totalPotentialRetail = products.filter(p => !p.is_archived).reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
+  const totalGoodsSoldCost = products.reduce((acc, p) => acc + ((parseFloat(p.cost_price) || 0) * getProductSoldQty(p.id)), 0);
+  const totalSalesRevenue = customers.reduce((acc, c) => acc + (c.history || []).reduce((hAcc, h) => hAcc + (parseFloat(h.total) || 0), 0), 0);
   const totalOutstandingDebt = customers.reduce((acc, c) => acc + (parseFloat(c.totalDebt) || 0), 0);
 
-  // Inventory Table Filter
   const uniqueBatches = ['ALL', ...new Set(products.map(p => p.batch_reference).filter(Boolean))];
   const filteredProducts = products.filter(p => {
     const matchesBatch = selectedBatchFilter === 'ALL' || p.batch_reference === selectedBatchFilter;
@@ -465,7 +231,6 @@ export default function AdminApp() {
     return matchesBatch && matchesArchiveState;
   });
 
-  // STRICT FRONT PAGE FILTER: UNARCHIVED & QUANTITY >= 1
   const frontPageProducts = products.filter(p => {
     const qty = parseInt(p.quantity);
     return !p.is_archived && !isNaN(qty) && qty >= 1;
@@ -507,10 +272,10 @@ export default function AdminApp() {
               <Package className="w-4 h-4" /> <span>Inventory & Batches</span>
             </button>
             <button onClick={() => setActiveTab('customers')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'customers' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
-              <Users className="w-4 h-4" /> <span>Customer Ledger & Cart</span>
+              <Users className="w-4 h-4" /> <span>Sales Ledger & Cart</span>
             </button>
             <button onClick={() => setActiveTab('storefront')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'storefront' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
-              <Eye className="w-4 h-4" /> <span>Front-Page Preview (Stock &gt;= 1)</span>
+              <Eye className="w-4 h-4" /> <span>Front-Page Preview</span>
             </button>
           </div>
           <button onClick={handleAdminLogout} className="w-full sm:w-auto px-3 py-1.5 text-xs font-bold bg-red-50 text-red-600 rounded-lg hover:bg-red-100 flex items-center justify-center space-x-1.5">
@@ -518,18 +283,18 @@ export default function AdminApp() {
           </button>
         </div>
 
-        {/* FINANCIAL METRICS (RETAINS ARCHIVED PRODUCT METRICS) */}
+        {/* FINANCIAL METRICS */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Achat Initial (Constant)</p>
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Achat Initial</p>
             <p className="text-sm sm:text-lg font-black text-gray-900 mt-1">{totalInventoryCost.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Vente Initiale (Constant)</p>
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Vente Initiale</p>
             <p className="text-sm sm:text-lg font-black text-indigo-600 mt-1">{totalExpectedRevenue.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Valeur Stock Actuel (Actif)</p>
+            <p className="text-[10px] font-extrabold uppercase text-gray-400">Valeur Stock Actuel</p>
             <p className="text-sm sm:text-lg font-black text-orange-600 mt-1">{totalPotentialRetail.toLocaleString()} FCFA</p>
           </div>
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
@@ -546,7 +311,7 @@ export default function AdminApp() {
           </div>
         </div>
 
-        {/* TAB 1: INVENTORY & ARCHIVE MANAGEMENT */}
+        {/* TAB 1: INVENTORY MANAGEMENT */}
         {activeTab === 'inventory' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit">
@@ -673,191 +438,18 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* TAB 2: LEDGER AND CART */}
+        {/* TAB 2: SEPARATED SALES LEDGER & CART COMPONENT */}
         {activeTab === 'customers' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit space-y-4">
-              <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 pb-2 border-b">Enregistrer une Vente (Panier Multi-Articles)</h3>
-              
-              <form onSubmit={handleFinalizeSale} className="space-y-4">
-                <div>
-                  <label className="text-[10px] text-gray-400 font-bold block mb-1">Sélectionner le Client (Supabase)</label>
-                  <select value={ledgerForm.customerId} onChange={e => setLedgerForm({...ledgerForm, customerId: e.target.value})} className="w-full border p-2.5 text-xs rounded-lg" required>
-                    <option value="">-- Choisir un Client --</option>
-                    <option value="new">+ Enregistrer un Nouveau Client</option>
-                    {customers.map(c => <option key={c.id} value={c.id}>{c.name} ({c.phone || 'Pas de téléphone'})</option>)}
-                  </select>
-                </div>
-                
-                {ledgerForm.customerId === 'new' && (
-                  <div className="space-y-3 p-3 bg-gray-50 rounded-lg border">
-                    <input type="text" placeholder="Nom du Client" value={ledgerForm.newName} onChange={e => setLedgerForm({...ledgerForm, newName: e.target.value})} className="w-full border p-2 text-xs rounded-lg bg-white" required />
-                    <input type="text" placeholder="Numéro de Téléphone (+225...)" value={ledgerForm.newPhone} onChange={e => setLedgerForm({...ledgerForm, newPhone: e.target.value})} className="w-full border p-2 text-xs rounded-lg bg-white" required />
-                  </div>
-                )}
-
-                <div className="bg-gray-50 p-3.5 rounded-xl border space-y-3">
-                  <label className="text-[10px] text-gray-500 font-bold uppercase block">Ajouter des articles au panier</label>
-                  <div className="grid grid-cols-1 gap-2">
-                    <select value={cartProductId} onChange={e => setCartProductId(e.target.value)} className="w-full border p-2 text-xs rounded-lg bg-white">
-                      <option value="">-- Choisir un produit actif --</option>
-                      {products.filter(p => !p.is_archived).map(p => (
-                        <option key={p.id} value={p.id}>
-                          [{p.batch_reference || 'N/A'}] {p.name} - {p.price?.toLocaleString()} FCFA (Stock: {p.quantity})
-                        </option>
-                      ))}
-                    </select>
-                    <div className="flex space-x-2">
-                      <input type="number" min="1" placeholder="Qté" value={cartQty} onChange={e => setCartQty(e.target.value)} className="w-20 border p-2 text-xs rounded-lg bg-white text-center font-bold" />
-                      <button type="button" onClick={handleAddToCart} className="flex-1 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold py-2 px-3 rounded-lg uppercase tracking-wider">
-                        + Ajouter au panier
-                      </button>
-                    </div>
-                  </div>
-
-                  {cartItems.length > 0 ? (
-                    <div className="mt-3 space-y-2">
-                      <div className="bg-white rounded-lg border overflow-hidden">
-                        <table className="w-full text-left text-xs">
-                          <thead className="bg-gray-100 text-gray-500 font-bold border-b">
-                            <tr>
-                              <th className="p-2">Article</th>
-                              <th className="p-2 text-center">Qté</th>
-                              <th className="p-2 text-right">Prix Unitaire</th>
-                              <th className="p-2 text-center">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {cartItems.map((item, index) => (
-                              <tr key={index} className="hover:bg-gray-50">
-                                <td className="p-2 font-bold">
-                                  {item.name} <span className="text-[9px] text-orange-600 block">({item.batch})</span>
-                                </td>
-                                <td className="p-2 text-center">
-                                  <input type="number" min="1" value={item.qty} onChange={(e) => handleUpdateCartItemQty(index, e.target.value)} className="w-14 border text-center p-1 rounded font-bold text-xs" />
-                                </td>
-                                <td className="p-2 text-right">
-                                  <input type="number" value={item.price} onChange={(e) => handleUpdateCartItemPrice(index, e.target.value)} className="w-24 border text-right p-1 rounded font-bold text-xs" />
-                                </td>
-                                <td className="p-2 text-center">
-                                  <button type="button" onClick={() => handleRemoveFromCart(index)} className="text-red-500 hover:text-red-700 p-1">
-                                    <Trash2 className="w-4 h-4 inline" />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-center text-[11px] text-gray-400 italic py-2">Le panier est actuellement vide.</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="text-[10px] text-gray-400 font-bold block mb-1">Montant Payé Initial (FCFA)</label>
-                  <input type="number" placeholder="Payé mtn" value={ledgerForm.initialPaid} onChange={e => setLedgerForm({...ledgerForm, initialPaid: e.target.value})} className="w-full border p-2.5 text-xs rounded-lg" required />
-                </div>
-
-                {cartItems.length > 0 && (
-                  <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-xs space-y-1">
-                    <div className="flex justify-between text-gray-600">
-                      <span>Total Panier:</span>
-                      <span className="font-bold">{cartTotal.toLocaleString()} FCFA</span>
-                    </div>
-                    <div className="flex justify-between text-gray-600">
-                      <span>Montant Payé:</span>
-                      <span className="font-bold text-green-600">{paidAmount.toLocaleString()} FCFA</span>
-                    </div>
-                    <div className="flex justify-between border-t border-orange-200 pt-1 text-orange-900 font-extrabold">
-                      <span>Ajouté à la Dette:</span>
-                      <span>{remainingDebt.toLocaleString()} FCFA</span>
-                    </div>
-                  </div>
-                )}
-                
-                <button type="submit" disabled={cartItems.length === 0} className="w-full bg-black hover:bg-gray-800 disabled:bg-gray-300 text-white text-xs py-3 rounded-lg font-bold uppercase tracking-wider">
-                  Terminer & Enregistrer dans Supabase
-                </button>
-              </form>
-            </div>
-
-            <div className="lg:col-span-2 space-y-6">
-              <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 mb-4 pb-2 border-b">Balances Clients & Historique</h3>
-                
-                {editingCustomer && (
-                  <form onSubmit={handleSaveCustomerEdit} className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-xl space-y-3">
-                    <div className="flex justify-between items-center">
-                      <h4 className="font-bold text-xs text-blue-900 uppercase">Modifier Client</h4>
-                      <button type="button" onClick={() => setEditingCustomer(null)} className="text-gray-400 hover:text-red-500 text-xs">Annuler</button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <input type="text" value={editingCustomer.name} onChange={e => setEditingCustomer({...editingCustomer, name: e.target.value})} className="border p-2 text-xs rounded bg-white" required placeholder="Nom" />
-                      <input type="text" value={editingCustomer.phone} onChange={e => setEditingCustomer({...editingCustomer, phone: e.target.value})} className="border p-2 text-xs rounded bg-white" required placeholder="Téléphone" />
-                    </div>
-                    <button type="submit" className="bg-blue-600 text-white text-xs px-4 py-1.5 rounded font-bold">Mettre à jour</button>
-                  </form>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {customers.map(c => (
-                    <div key={c.id} className="border rounded-xl p-4 bg-gray-50 flex flex-col justify-between space-y-3">
-                      <div>
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <h4 className="font-black text-sm">{c.name}</h4>
-                            <p className="text-[11px] text-gray-500 flex items-center mt-0.5"><Phone className="w-3 h-3 mr-1" /> {c.phone || 'Pas de téléphone'}</p>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <button onClick={() => setEditingCustomer(c)} className="text-gray-400 hover:text-blue-600 text-xs">
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${c.totalDebt > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                              Dette: {c.totalDebt.toLocaleString()} FCFA
-                            </span>
-                          </div>
-                        </div>
-                        
-                        {c.totalDebt > 0 && (
-                          <form onSubmit={(e) => handleRecordPayment(e, c.id, c.totalDebt)} className="mt-3 flex space-x-2">
-                            <input type="number" placeholder="Montant du paiement" value={paymentForm.customerId === c.id ? paymentForm.amount : ''} onChange={e => setPaymentForm({ amount: e.target.value, customerId: c.id })} className="w-full border p-1.5 text-xs rounded bg-white" required />
-                            <button type="submit" className="bg-green-600 text-white text-[10px] px-3 rounded font-bold whitespace-nowrap">Régler Dette</button>
-                          </form>
-                        )}
-                      </div>
-
-                      <div className="pt-2 border-t">
-                        <p className="text-[10px] font-bold text-gray-400 mb-1">HISTORIQUE SUPABASE:</p>
-                        <ul className="text-[10px] space-y-1.5 text-gray-600 max-h-32 overflow-y-auto">
-                          {c.history.map((h, i) => (
-                            <li key={i} className="bg-white p-2 rounded border border-gray-100 flex justify-between items-center">
-                              <div>
-                                <span className="font-bold text-gray-700">{h.date}</span>: {h.goods} <span className="text-orange-600 font-bold">({h.batch || h.type})</span>
-                              </div>
-                              <div className="text-right whitespace-nowrap ml-2">
-                                <span>Total: {h.total?.toLocaleString()}</span> | Paid: <span className="text-green-600 font-bold">{h.paid?.toLocaleString()}</span>
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  ))}
-                  {customers.length === 0 && (
-                    <div className="col-span-full text-center py-12 text-gray-400 text-xs bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                      Aucun client enregistré dans Supabase pour le moment.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-          </div>
+          <SalesLedger 
+            products={products}
+            customers={customers}
+            fetchProducts={fetchProducts}
+            fetchCustomers={fetchCustomersFromSupabase}
+            supabase={supabase}
+          />
         )}
 
-        {/* TAB 3: STOREFRONT PREVIEW (STRICTLY UNARCHIVED AND STOCK >= 1) */}
+        {/* TAB 3: STOREFRONT PREVIEW */}
         {activeTab === 'storefront' && (
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b gap-2">
