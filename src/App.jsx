@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import ClientApp from './ClientApp';
 import AdminApp from './AdminApp';
-import { supabase } from './supabaseClient'; // Ensure this points to your actual Supabase client file
+import { supabase } from './supabaseClient';
 import { Lock, LogOut } from 'lucide-react';
 
 export default function App() {
