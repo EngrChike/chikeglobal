@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Users, Eye, Pencil, Archive, RotateCcw, X, Layers, UserCog } from 'lucide-react';
+import { Package, Users, Eye, Pencil, Archive, RotateCcw, X, Layers, UserCog, Key } from 'lucide-react';
 import SalesLedger from './SalesLedger';
 
 export default function AdminApp({ currentUser, supabase }) {
@@ -83,6 +83,18 @@ export default function AdminApp({ currentUser, supabase }) {
     }
   };
 
+  // Admin PIN Verification Helper
+  const verifyAdminPinBeforeAction = () => {
+    const adminPin = prompt("Sécurité Admin : Entrez votre code PIN Administrateur pour confirmer :");
+    if (!adminPin) return false;
+    const verifyingAdmin = staffList.find(s => s.pin_code === adminPin && s.role === 'admin' && s.is_active);
+    if (!verifyingAdmin) {
+      alert("Code PIN administrateur incorrect ou non autorisé.");
+      return false;
+    }
+    return true;
+  };
+
   const handleSaveStaff = async (e) => {
     e.preventDefault();
     if (!staffName || !staffPin) return;
@@ -116,8 +128,14 @@ export default function AdminApp({ currentUser, supabase }) {
   };
 
   const handleToggleStaffStatus = async (id, currentStatus) => {
+    if (!verifyAdminPinBeforeAction()) return;
     const { error } = await supabase.from('staff').update({ is_active: !currentStatus }).eq('id', id);
-    if (!error) fetchStaffFromSupabase();
+    if (!error) {
+      fetchStaffFromSupabase();
+      alert('Statut mis à jour avec succès !');
+    } else {
+      alert(`Erreur: ${error.message}`);
+    }
   };
 
   const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.75) => {
@@ -548,8 +566,9 @@ export default function AdminApp({ currentUser, supabase }) {
             </div>
 
             <div className="lg:col-span-2 bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-4">
-              <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 pb-3 border-b">
-                Liste du Personnel & Codes PIN
+              <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 pb-3 border-b flex items-center justify-between">
+                <span>Liste du Personnel & Codes PIN (Masqués par sécurité)</span>
+                <Key className="w-4 h-4 text-gray-400" />
               </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
@@ -566,7 +585,7 @@ export default function AdminApp({ currentUser, supabase }) {
                     {staffList.map((s) => (
                       <tr key={s.id} className="hover:bg-gray-50/50">
                         <td className="p-2.5 font-bold">{s.full_name}</td>
-                        <td className="p-2.5 font-mono tracking-widest">{s.pin_code}</td>
+                        <td className="p-2.5 font-mono text-gray-400 tracking-widest">••••</td>
                         <td className="p-2.5">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${s.role === 'admin' ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-700'}`}>
                             {s.role}
@@ -579,7 +598,13 @@ export default function AdminApp({ currentUser, supabase }) {
                         </td>
                         <td className="p-2.5 text-center space-x-2">
                           <button 
-                            onClick={() => { setEditingStaff(s); setStaffName(s.full_name); setStaffPin(s.pin_code); setStaffRole(s.role); }} 
+                            onClick={() => {
+                              if (!verifyAdminPinBeforeAction()) return;
+                              setEditingStaff(s); 
+                              setStaffName(s.full_name); 
+                              setStaffPin(s.pin_code); 
+                              setStaffRole(s.role); 
+                            }} 
                             className="text-blue-500 hover:text-blue-700 font-bold"
                           >
                             Éditer
