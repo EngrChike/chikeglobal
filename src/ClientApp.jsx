@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase } from './utils/supabaseClient';
 import { ShoppingCart, Smartphone, Star, Heart, Video, Search, X, Lock } from 'lucide-react';
 
 export default function ClientApp() {
