@@ -5,10 +5,7 @@ import { supabase } from './supabaseClient';
 import { Lock, LogOut } from 'lucide-react';
 
 export default function App() {
-  // Routing State
   const [isAdminRoute, setIsAdminRoute] = useState(window.location.hash === '#admin');
-  
-  // Authentication State
   const [currentUser, setCurrentUser] = useState(null);
   const [pinInput, setPinInput] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -23,7 +20,6 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // Handle PIN Login Verification
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
@@ -42,7 +38,7 @@ export default function App() {
         setLoginError('Ce compte a été désactivé. Veuillez contacter un administrateur.');
       } else {
         setCurrentUser(data);
-        setPinInput(''); // Clear input on successful login
+        setPinInput('');
       }
     } catch (err) {
       setLoginError('Erreur de connexion au serveur.');
@@ -56,12 +52,10 @@ export default function App() {
     setPinInput('');
   };
 
-  // 1. Render Public Storefront
   if (!isAdminRoute) {
     return <ClientApp />;
   }
 
-  // 2. Render Login Screen (if on #admin route but not logged in)
   if (isAdminRoute && !currentUser) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
@@ -110,10 +104,8 @@ export default function App() {
     );
   }
 
-  // 3. Render Secure Admin/Staff Portal
   return (
     <div className="relative min-h-screen flex flex-col">
-      {/* Universal Top Bar indicating who is logged in */}
       <div className="bg-black text-white text-xs px-4 py-2.5 flex justify-between items-center z-50">
         <div className="flex items-center space-x-3">
           <span className="font-bold">{currentUser.full_name}</span>
@@ -132,10 +124,6 @@ export default function App() {
         </button>
       </div>
       
-      {/* 
-        Pass currentUser down so AdminApp knows whether to show all menus (admin) 
-        or just the sales ledger (staff).
-      */}
       <div className="flex-grow">
         <AdminApp currentUser={currentUser} supabase={supabase} />
       </div>
