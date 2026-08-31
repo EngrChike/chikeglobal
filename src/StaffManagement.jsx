@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { UserPlus, UserCheck, UserX, Calendar, Clock, Folder, FolderOpen, ChevronDown, ChevronRight, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { UserPlus, UserCheck, UserX, Calendar, Clock, Folder, FolderOpen, ChevronDown, ChevronRight, ShieldCheck, Key } from 'lucide-react';
 
 export default function StaffManagement({ supabase }) {
   const [staffList, setStaffList] = useState([]);
   const [salesHistory, setSalesHistory] = useState([]);
   const [newStaff, setNewStaff] = useState({ fullName: '', pinCode: '', role: 'staff' });
   const [expandedMonths, setExpandedMonths] = useState({});
-  const [visiblePins, setVisiblePins] = useState({});
 
   useEffect(() => {
     fetchStaff();
@@ -19,14 +18,13 @@ export default function StaffManagement({ supabase }) {
   };
 
   const fetchSales = async () => {
+    // Fetch sales history linked to staff
     const { data, error } = await supabase
       .from('customer_history')
       .select('*')
+      .not('staff_id', 'is', null)
       .order('created_at', { ascending: false });
-    
-    if (!error && data) {
-      setSalesHistory(data);
-    }
+    if (!error && data) setSalesHistory(data);
   };
 
   const handleCreateStaff = async (e) => {
@@ -48,41 +46,47 @@ export default function StaffManagement({ supabase }) {
     }
   };
 
-  const verifyAdminAndToggleStatus = async (id, currentStatus) => {
-    const enteredPin = window.prompt("Sécurité requise : Entrez le code PIN Administrateur pour modifier ce statut :");
-    if (!enteredPin) return;
+  const toggleStaffStatus = async (id, currentStatus) => {
+    // Security check: Require Admin PIN before modifying staff status
+    const adminPin = prompt("Sécurité Admin : Entrez votre code PIN Administrateur pour confirmer :");
+    if (!adminPin) return;
 
-    const adminAuthorized = staffList.find(
-      s => s.role === 'admin' && String(s.pin_code) === String(enteredPin.trim()) && s.is_active
-    );
-
-    if (!adminAuthorized) {
-      alert("Code PIN Administrateur incorrect ou non autorisé !");
+    const verifyingAdmin = staffList.find(s => s.pin_code === adminPin && s.role === 'admin' && s.is_active);
+    if (!verifyingAdmin) {
+      alert("Code PIN administrateur incorrect ou non autorisé.");
       return;
     }
 
     const { error } = await supabase.from('staff').update({ is_active: !currentStatus }).eq('id', id);
     if (!error) {
       fetchStaff();
-      alert("Statut du compte mis à jour avec succès.");
+      alert("Statut mis à jour avec succès.");
     } else {
       alert("Erreur lors de la mise à jour.");
     }
-  };
-
-  const togglePinVisibility = (id) => {
-    setVisiblePins(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
   const toggleMonth = (monthKey) => {
     setExpandedMonths(prev => ({ ...prev, [monthKey]: !prev[monthKey] }));
   };
 
+  // Create a fallback mapping from staff_id to staff name in case sale.staff_name is missing
+  const staffMap = useMemo(() => {
+    const map = {};
+    staffList.forEach(s => {
+      map[s.id] = s.full_name;
+    });
+    return map;
+  }, [staffList]);
+
+  // --- LOGIC: Calculate 6 AM Shift & Grouping ---
   const { todayStats, monthlyArchives } = useMemo(() => {
     const now = new Date();
+    
+    // Determine the start of the current shift (6 AM)
     const shiftStart = new Date(now);
     if (now.getHours() < 6) {
-      shiftStart.setDate(shiftStart.getDate() - 1);
+      shiftStart.setDate(shiftStart.getDate() - 1); 
     }
     shiftStart.setHours(6, 0, 0, 0);
 
@@ -91,14 +95,17 @@ export default function StaffManagement({ supabase }) {
 
     salesHistory.forEach(sale => {
       const saleDate = new Date(sale.created_at);
-      const staffName = sale.staff_name || 'Vente Directe / Non assigné';
-      const total = parseFloat(sale.total) || 0;
+      // Fallback lookup using staff_id if sale.staff_name is not populated
+      const staffName = sale.staff_name || staffMap[sale.staff_id] || 'Inconnu';
+      const total = sale.total || 0;
 
       if (saleDate >= shiftStart) {
+        // Belongs to TODAY's 6 AM Shift
         if (!todayData[staffName]) todayData[staffName] = { count: 0, total: 0 };
         todayData[staffName].count += 1;
         todayData[staffName].total += total;
       } else {
+        // Belongs to MONTHLY ARCHIVES
         const monthKey = `${saleDate.getFullYear()}-${String(saleDate.getMonth() + 1).padStart(2, '0')}`;
         const monthLabel = saleDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 
@@ -111,12 +118,14 @@ export default function StaffManagement({ supabase }) {
     });
 
     return { todayStats: todayData, monthlyArchives: archives };
-  }, [salesHistory]);
+  }, [salesHistory, staffMap]);
 
   return (
     <div className="space-y-6">
       
+      {/* SECTION 1: ACCOUNT CREATION & MANAGEMENT */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Create Account Form */}
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit">
           <h3 className="font-bold text-xs uppercase text-gray-700 pb-2 border-b mb-4 flex items-center">
             <UserPlus className="w-4 h-4 mr-2" /> Créer un Compte Staff
@@ -145,8 +154,12 @@ export default function StaffManagement({ supabase }) {
           </form>
         </div>
 
+        {/* Staff List */}
         <div className="lg:col-span-2 bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-          <h3 className="font-bold text-xs uppercase text-gray-700 pb-2 border-b mb-4">Comptes Existants & Sécurité PIN</h3>
+          <h3 className="font-bold text-xs uppercase text-gray-700 pb-2 border-b mb-4 flex items-center justify-between">
+            <span>Comptes Existants (PIN masqué par sécurité)</span>
+            <Key className="w-4 h-4 text-gray-400" />
+          </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-gray-50 border-b">
@@ -155,19 +168,14 @@ export default function StaffManagement({ supabase }) {
                   <th className="p-2">Code PIN</th>
                   <th className="p-2">Rôle</th>
                   <th className="p-2">Statut</th>
-                  <th className="p-2 text-right">Action (Admin requis)</th>
+                  <th className="p-2 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {staffList.map(staff => (
                   <tr key={staff.id}>
                     <td className="p-2 font-bold">{staff.full_name}</td>
-                    <td className="p-2 font-mono flex items-center space-x-2">
-                      <span>{visiblePins[staff.id] ? staff.pin_code : '••••'}</span>
-                      <button onClick={() => togglePinVisibility(staff.id)} className="text-gray-400 hover:text-gray-600">
-                        {visiblePins[staff.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      </button>
-                    </td>
+                    <td className="p-2 font-mono text-gray-400 tracking-widest">••••</td>
                     <td className="p-2 uppercase text-[10px] text-gray-500">{staff.role}</td>
                     <td className="p-2">
                       {staff.is_active ? 
@@ -177,7 +185,7 @@ export default function StaffManagement({ supabase }) {
                     </td>
                     <td className="p-2 text-right">
                       {staff.role !== 'admin' && (
-                        <button onClick={() => verifyAdminAndToggleStatus(staff.id, staff.is_active)} className={`text-[10px] font-bold px-3 py-1 rounded ${staff.is_active ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                        <button onClick={() => toggleStaffStatus(staff.id, staff.is_active)} className={`text-[10px] font-bold px-3 py-1 rounded ${staff.is_active ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                           {staff.is_active ? 'Désactiver' : 'Activer'}
                         </button>
                       )}
@@ -190,6 +198,7 @@ export default function StaffManagement({ supabase }) {
         </div>
       </div>
 
+      {/* SECTION 2: PERFORMANCE TRACKING */}
       <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
         <h3 className="font-bold text-xs uppercase text-gray-700 pb-2 border-b mb-4 flex items-center">
           <Clock className="w-4 h-4 mr-2 text-orange-500" /> 
@@ -204,7 +213,7 @@ export default function StaffManagement({ supabase }) {
               <p className="text-[10px] text-gray-400">{data.count} transaction(s)</p>
             </div>
           )) : (
-            <p className="text-xs text-gray-400 italic col-span-full">Aucune vente enregistrée depuis 6h00 AM.</p>
+            <p className="text-xs text-gray-400 italic col-span-full">Aucune vente enregistrée depuis 6h00.</p>
           )}
         </div>
 
