@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Trash2, Pencil, Phone, Search, Folder, FolderOpen, Calendar, Clock, User, ChevronDown, ChevronRight } from 'lucide-react';
 
-export default function SalesLedger({ products, customers, fetchProducts, fetchCustomers, supabase }) {
+export default function SalesLedger({ products, customers, fetchProducts, fetchCustomers, supabase, currentUser }) {
   // Staging / Accumulator Cart State
   const [cartItems, setCartItems] = useState(() => {
     try {
@@ -42,13 +42,20 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
   // State for collapsible month folders (Current month expanded by default)
   const [expandedMonths, setExpandedMonths] = useState({ [currentMonthKey]: true });
 
-  // Fetch all sales directly from customer_history table
+  // Fetch sales directly from customer_history table (Filtered by Role)
   const fetchSalesHistory = async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('customer_history')
         .select('*')
         .order('id', { ascending: false });
+
+      // If the current user is NOT an admin, restrict fetch to their own sales only
+      if (currentUser?.role !== 'admin') {
+        query = query.eq('staff_id', currentUser?.id);
+      }
+
+      const { data, error } = await query;
 
       if (!error && data) {
         setSalesHistory(data);
@@ -59,8 +66,10 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
   };
 
   useEffect(() => {
-    fetchSalesHistory();
-  }, []);
+    if (currentUser) {
+      fetchSalesHistory();
+    }
+  }, [currentUser]); // Re-run if currentUser changes
 
   // Sync cart to local storage
   useEffect(() => {
@@ -192,6 +201,7 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
       // Record Sale Payload
       const salePayload = {
         customer_id: targetCustomerId,
+        staff_id: currentUser?.id, // Attaching the staff ID here
         date: currentDate,
         goods: goodsDescription,
         batch: cartItems.length === 1 ? cartItems[0].batch : 'MULTI-BATCH',
@@ -502,7 +512,7 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
           
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b">
             <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700">
-              Historique des Ventes par Mois
+              Historique des Ventes {currentUser?.role !== 'admin' ? '(Vos Ventes)' : 'Global'}
             </h3>
 
             <div className="relative w-full md:w-72">

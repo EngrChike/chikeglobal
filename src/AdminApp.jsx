@@ -1,21 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from './utils/supabaseClient';
-import { Package, Users, Eye, LogOut, Pencil, Archive, RotateCcw, X, Layers } from 'lucide-react';
+import { Package, Users, Eye, Pencil, Archive, RotateCcw, X, Layers } from 'lucide-react';
 import SalesLedger from './SalesLedger';
 
-export default function AdminApp() {
-  const [session, setSession] = useState(null);
-  const [adminEmail, setAdminEmail] = useState('');
-  const [adminPassword, setAdminPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
+export default function AdminApp({ currentUser, supabase }) {
+  // Determine role access
+  const isAdmin = currentUser?.role === 'admin';
+  
+  // Default to inventory for Admin, but force Sales Ledger for Staff
+  const [activeTab, setActiveTab] = useState(isAdmin ? 'inventory' : 'customers'); 
 
-  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory', 'customers', or 'storefront'
+  // Data states
   const [products, setProducts] = useState([]);
   const [selectedBatchFilter, setSelectedBatchFilter] = useState('ALL');
   const [showArchived, setShowArchived] = useState(false);
+  const [customers, setCustomers] = useState([]);
 
-  // Inventory states
+  // Inventory forms states
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [costPrice, setCostPrice] = useState('');
@@ -27,15 +27,9 @@ export default function AdminApp() {
   const [uploading, setUploading] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
 
-  // Customer Ledger
-  const [customers, setCustomers] = useState([]);
-
   useEffect(() => {
     fetchProducts();
     fetchCustomersFromSupabase();
-    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
-    return () => subscription.unsubscribe();
   }, []);
 
   const fetchProducts = async () => {
@@ -69,23 +63,6 @@ export default function AdminApp() {
       console.error("Erreur chargement clients Supabase:", err.message);
     }
   };
-
-  const handleAdminLogin = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-    setAuthLoading(true);
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email: adminEmail, password: adminPassword });
-      if (error) setAuthError(error.message);
-      else { setAdminEmail(''); setAdminPassword(''); }
-    } catch (err) {
-      setAuthError('Erreur inattendue.');
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleAdminLogout = async () => await supabase.auth.signOut();
 
   const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.75) => {
     return new Promise((resolve, reject) => {
@@ -217,6 +194,7 @@ export default function AdminApp() {
     return (parseInt(p.quantity) || 0) + soldQty;
   };
 
+  // Financial Metrics Variables
   const totalInventoryCost = products.reduce((acc, p) => acc + ((parseFloat(p.cost_price) || 0) * getTrueInitialQty(p)), 0);
   const totalExpectedRevenue = products.reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * getTrueInitialQty(p)), 0);
   const totalPotentialRetail = products.filter(p => !p.is_archived).reduce((acc, p) => acc + ((parseFloat(p.price) || 0) * (parseInt(p.quantity) || 0)), 0);
@@ -236,83 +214,66 @@ export default function AdminApp() {
     return !p.is_archived && !isNaN(qty) && qty >= 1;
   });
 
-  if (!session) {
-    return (
-      <div className="min-h-screen bg-[#f5f5f7] flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-          <div className="text-center mb-5">
-            <h2 className="text-lg font-bold text-gray-900">Connexion Admin</h2>
-            <p className="text-xs text-gray-500 mt-1">AkuDon Cosmetics Ventures - Admin Portal</p>
-            {authError && <p className="text-red-500 text-xs mt-2 font-medium bg-red-50 p-2 rounded-lg">{authError}</p>} 
-          </div>
-          <form onSubmit={handleAdminLogin} className="space-y-4">
-            <div>
-              <label className="text-[10px] font-bold uppercase text-gray-500 block mb-1">Adresse Email</label>
-              <input type="email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} className="w-full border p-2.5 rounded-xl text-xs" required />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold uppercase text-gray-500 block mb-1">Mot de passe</label>
-              <input type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} className="w-full border p-2.5 rounded-xl text-xs" required />
-            </div>
-            <button type="submit" disabled={authLoading} className="w-full bg-zinc-950 hover:bg-zinc-800 text-white text-xs font-bold py-2.5 rounded-xl uppercase tracking-wider">{authLoading ? 'Connexion...' : 'Se connecter'}</button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-[#f5f5f7] text-gray-900 font-sans p-3 sm:p-6 lg:p-8">
+    <div className="bg-[#f5f5f7] text-gray-900 font-sans p-3 sm:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         
-        {/* HEADER */}
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-          <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-            <button onClick={() => setActiveTab('inventory')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'inventory' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
-              <Package className="w-4 h-4" /> <span>Inventory & Batches</span>
-            </button>
-            <button onClick={() => setActiveTab('customers')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'customers' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
-              <Users className="w-4 h-4" /> <span>Sales Ledger & Cart</span>
-            </button>
-            <button onClick={() => setActiveTab('storefront')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'storefront' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
-              <Eye className="w-4 h-4" /> <span>Front-Page Preview</span>
-            </button>
+        {/* HEADER - Only show if Admin, otherwise just display a title for staff */}
+        {isAdmin ? (
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+            <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+              <button onClick={() => setActiveTab('inventory')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'inventory' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
+                <Package className="w-4 h-4" /> <span>Inventory & Batches</span>
+              </button>
+              <button onClick={() => setActiveTab('customers')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'customers' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
+                <Users className="w-4 h-4" /> <span>Sales Ledger & Cart</span>
+              </button>
+              <button onClick={() => setActiveTab('storefront')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'storefront' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
+                <Eye className="w-4 h-4" /> <span>Front-Page Preview</span>
+              </button>
+            </div>
           </div>
-          <button onClick={handleAdminLogout} className="w-full sm:w-auto px-3 py-1.5 text-xs font-bold bg-red-50 text-red-600 rounded-lg hover:bg-red-100 flex items-center justify-center space-x-1.5">
-            <LogOut className="w-3.5 h-3.5" /> <span>Déconnexion</span>
-          </button>
-        </div>
+        ) : (
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+            <h2 className="text-sm font-black uppercase text-gray-800 flex items-center gap-2">
+              <Users className="w-4 h-4 text-[#f68b1e]" /> 
+              Interface de Vente - {currentUser.full_name}
+            </h2>
+          </div>
+        )}
 
-        {/* FINANCIAL METRICS */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Achat Initial</p>
-            <p className="text-sm sm:text-lg font-black text-gray-900 mt-1">{totalInventoryCost.toLocaleString()} FCFA</p>
+        {/* FINANCIAL METRICS - Restricted to Admin Only */}
+        {isAdmin && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+              <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Achat Initial</p>
+              <p className="text-sm sm:text-lg font-black text-gray-900 mt-1">{totalInventoryCost.toLocaleString()} FCFA</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+              <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Vente Initiale</p>
+              <p className="text-sm sm:text-lg font-black text-indigo-600 mt-1">{totalExpectedRevenue.toLocaleString()} FCFA</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+              <p className="text-[10px] font-extrabold uppercase text-gray-400">Valeur Stock Actuel</p>
+              <p className="text-sm sm:text-lg font-black text-orange-600 mt-1">{totalPotentialRetail.toLocaleString()} FCFA</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+              <p className="text-[10px] font-extrabold uppercase text-gray-400">Coût Marchandises Vendues</p>
+              <p className="text-sm sm:text-lg font-black text-purple-600 mt-1">{totalGoodsSoldCost.toLocaleString()} FCFA</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+              <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Ventes (Revenue)</p>
+              <p className="text-sm sm:text-lg font-black text-blue-600 mt-1">{totalSalesRevenue.toLocaleString()} FCFA</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+              <p className="text-[10px] font-extrabold uppercase text-gray-400">Dettes Clients Restantes</p>
+              <p className="text-sm sm:text-lg font-black text-red-600 mt-1">{totalOutstandingDebt.toLocaleString()} FCFA</p>
+            </div>
           </div>
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Vente Initiale</p>
-            <p className="text-sm sm:text-lg font-black text-indigo-600 mt-1">{totalExpectedRevenue.toLocaleString()} FCFA</p>
-          </div>
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Valeur Stock Actuel</p>
-            <p className="text-sm sm:text-lg font-black text-orange-600 mt-1">{totalPotentialRetail.toLocaleString()} FCFA</p>
-          </div>
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Coût Marchandises Vendues</p>
-            <p className="text-sm sm:text-lg font-black text-purple-600 mt-1">{totalGoodsSoldCost.toLocaleString()} FCFA</p>
-          </div>
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Total Ventes (Revenue)</p>
-            <p className="text-sm sm:text-lg font-black text-blue-600 mt-1">{totalSalesRevenue.toLocaleString()} FCFA</p>
-          </div>
-          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-            <p className="text-[10px] font-extrabold uppercase text-gray-400">Dettes Clients Restantes</p>
-            <p className="text-sm sm:text-lg font-black text-red-600 mt-1">{totalOutstandingDebt.toLocaleString()} FCFA</p>
-          </div>
-        </div>
+        )}
 
-        {/* TAB 1: INVENTORY MANAGEMENT */}
-        {activeTab === 'inventory' && (
+        {/* TAB 1: INVENTORY MANAGEMENT - Admin Only */}
+        {isAdmin && activeTab === 'inventory' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit">
               <div className="flex justify-between items-center mb-4 pb-2 border-b">
@@ -438,7 +399,7 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* TAB 2: SEPARATED SALES LEDGER & CART COMPONENT */}
+        {/* TAB 2: SEPARATED SALES LEDGER & CART COMPONENT (Visible to both Admin and Staff) */}
         {activeTab === 'customers' && (
           <SalesLedger 
             products={products}
@@ -446,11 +407,12 @@ export default function AdminApp() {
             fetchProducts={fetchProducts}
             fetchCustomers={fetchCustomersFromSupabase}
             supabase={supabase}
+            currentUser={currentUser} /* Passed down for saving staff_id */
           />
         )}
 
-        {/* TAB 3: STOREFRONT PREVIEW */}
-        {activeTab === 'storefront' && (
+        {/* TAB 3: STOREFRONT PREVIEW - Admin Only */}
+        {isAdmin && activeTab === 'storefront' && (
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b gap-2">
               <div>
