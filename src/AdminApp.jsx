@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Users, Eye, Pencil, Archive, RotateCcw, X, Layers } from 'lucide-react';
+import { Package, Users, Eye, Pencil, Archive, RotateCcw, X, Layers, UserCog } from 'lucide-react';
 import SalesLedger from './SalesLedger';
 
 export default function AdminApp({ currentUser, supabase }) {
@@ -14,6 +14,13 @@ export default function AdminApp({ currentUser, supabase }) {
   const [selectedBatchFilter, setSelectedBatchFilter] = useState('ALL');
   const [showArchived, setShowArchived] = useState(false);
   const [customers, setCustomers] = useState([]);
+  const [staffList, setStaffList] = useState([]);
+
+  // Staff form states
+  const [staffName, setStaffName] = useState('');
+  const [staffPin, setStaffPin] = useState('');
+  const [staffRole, setStaffRole] = useState('staff');
+  const [editingStaff, setEditingStaff] = useState(null);
 
   // Inventory forms states
   const [name, setName] = useState('');
@@ -30,7 +37,10 @@ export default function AdminApp({ currentUser, supabase }) {
   useEffect(() => {
     fetchProducts();
     fetchCustomersFromSupabase();
-  }, []);
+    if (isAdmin) {
+      fetchStaffFromSupabase();
+    }
+  }, [isAdmin]);
 
   const fetchProducts = async () => {
     try {
@@ -62,6 +72,52 @@ export default function AdminApp({ currentUser, supabase }) {
     } catch (err) {
       console.error("Erreur chargement clients Supabase:", err.message);
     }
+  };
+
+  const fetchStaffFromSupabase = async () => {
+    try {
+      const { data, error } = await supabase.from('staff').select('*').order('created_at', { ascending: false });
+      if (!error && data) setStaffList(data);
+    } catch (err) {
+      console.error("Erreur chargement personnel:", err);
+    }
+  };
+
+  const handleSaveStaff = async (e) => {
+    e.preventDefault();
+    if (!staffName || !staffPin) return;
+
+    try {
+      const payload = {
+        full_name: staffName.trim(),
+        pin_code: staffPin.trim(),
+        role: staffRole,
+        is_active: true
+      };
+
+      if (editingStaff) {
+        const { error } = await supabase.from('staff').update(payload).eq('id', editingStaff.id);
+        if (error) throw error;
+        alert('Membre du personnel mis à jour avec succès !');
+      } else {
+        const { error } = await supabase.from('staff').insert([payload]);
+        if (error) throw error;
+        alert('Nouveau membre ajouté avec succès !');
+      }
+
+      setStaffName('');
+      setStaffPin('');
+      setStaffRole('staff');
+      setEditingStaff(null);
+      fetchStaffFromSupabase();
+    } catch (err) {
+      alert(`Erreur: ${err.message}`);
+    }
+  };
+
+  const handleToggleStaffStatus = async (id, currentStatus) => {
+    const { error } = await supabase.from('staff').update({ is_active: !currentStatus }).eq('id', id);
+    if (!error) fetchStaffFromSupabase();
   };
 
   const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.75) => {
@@ -218,7 +274,7 @@ export default function AdminApp({ currentUser, supabase }) {
     <div className="bg-[#f5f5f7] text-gray-900 font-sans p-3 sm:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         
-        {/* HEADER - Only show if Admin, otherwise just display a title for staff */}
+        {/* HEADER NAVIGATION */}
         {isAdmin ? (
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
             <div className="flex flex-wrap gap-2 w-full sm:w-auto">
@@ -230,6 +286,9 @@ export default function AdminApp({ currentUser, supabase }) {
               </button>
               <button onClick={() => setActiveTab('storefront')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'storefront' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
                 <Eye className="w-4 h-4" /> <span>Front-Page Preview</span>
+              </button>
+              <button onClick={() => setActiveTab('staff')} className={`flex-1 sm:flex-none px-4 py-2 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center space-x-2 ${activeTab === 'staff' ? 'bg-[#f68b1e] text-white' : 'bg-gray-100 text-gray-600'}`}>
+                <UserCog className="w-4 h-4" /> <span>Gestion du Personnel</span>
               </button>
             </div>
           </div>
@@ -272,7 +331,7 @@ export default function AdminApp({ currentUser, supabase }) {
           </div>
         )}
 
-        {/* TAB 1: INVENTORY MANAGEMENT - Admin Only */}
+        {/* TAB 1: INVENTORY MANAGEMENT */}
         {isAdmin && activeTab === 'inventory' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit">
@@ -399,7 +458,7 @@ export default function AdminApp({ currentUser, supabase }) {
           </div>
         )}
 
-        {/* TAB 2: SEPARATED SALES LEDGER & CART COMPONENT (Visible to both Admin and Staff) */}
+        {/* TAB 2: SALES LEDGER & CART */}
         {activeTab === 'customers' && (
           <SalesLedger 
             products={products}
@@ -407,17 +466,17 @@ export default function AdminApp({ currentUser, supabase }) {
             fetchProducts={fetchProducts}
             fetchCustomers={fetchCustomersFromSupabase}
             supabase={supabase}
-            currentUser={currentUser} /* Passed down for saving staff_id */
+            currentUser={currentUser}
           />
         )}
 
-        {/* TAB 3: STOREFRONT PREVIEW - Admin Only */}
+        {/* TAB 3: STOREFRONT PREVIEW */}
         {isAdmin && activeTab === 'storefront' && (
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b gap-2">
               <div>
                 <h3 className="font-black text-sm uppercase tracking-wide text-gray-900">Aperçu Front-Page (Catalogue Public)</h3>
-                <p className="text-xs text-gray-500 mt-0.5">Seuls les articles non-archivés avec au moins 1 produit en stock (quantité &gt;= 1) sont affichés ici.</p>
+                <p className="text-xs text-gray-500 mt-0.5">Seuls les articles non-archivés avec au moins 1 produit en stock sont affichés ici.</p>
               </div>
               <span className="bg-green-100 text-green-800 text-xs font-bold px-3 py-1 rounded-full">
                 {frontPageProducts.length} articles visibles sur la boutique
@@ -448,6 +507,95 @@ export default function AdminApp({ currentUser, supabase }) {
                   Aucun produit actif en stock pour le moment.
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: STAFF MANAGEMENT */}
+        {isAdmin && activeTab === 'staff' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit">
+              <div className="flex justify-between items-center mb-4 pb-2 border-b">
+                <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700">
+                  {editingStaff ? 'Modifier le personnel' : 'Ajouter un membre'}
+                </h3>
+                {editingStaff && (
+                  <button onClick={() => { setEditingStaff(null); setStaffName(''); setStaffPin(''); setStaffRole('staff'); }} className="text-gray-400 hover:text-red-500 text-xs">
+                    Annuler
+                  </button>
+                )}
+              </div>
+              <form onSubmit={handleSaveStaff} className="space-y-3.5">
+                <div>
+                  <label className="text-[10px] text-gray-400 font-bold block mb-1">Nom Complet</label>
+                  <input type="text" placeholder="Ex: Jean Kouassi" value={staffName} onChange={e => setStaffName(e.target.value)} className="w-full border p-2.5 text-xs rounded-lg" required />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 font-bold block mb-1">Code PIN (Connexion)</label>
+                  <input type="text" placeholder="Ex: 1234" value={staffPin} onChange={e => setStaffPin(e.target.value)} className="w-full border p-2.5 text-xs rounded-lg" required />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 font-bold block mb-1">Rôle</label>
+                  <select value={staffRole} onChange={e => setStaffRole(e.target.value)} className="w-full border p-2.5 text-xs rounded-lg bg-gray-50 font-bold">
+                    <option value="staff">Staff (Vendeur)</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <button type="submit" className="w-full bg-[#f68b1e] text-white text-xs py-3 rounded-lg font-bold uppercase tracking-wider">
+                  {editingStaff ? 'Mettre à jour' : 'Créer le membre'}
+                </button>
+              </form>
+            </div>
+
+            <div className="lg:col-span-2 bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-4">
+              <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 pb-3 border-b">
+                Liste du Personnel & Codes PIN
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 text-gray-400 font-bold border-b">
+                      <th className="p-2.5">Nom</th>
+                      <th className="p-2.5">Code PIN</th>
+                      <th className="p-2.5">Rôle</th>
+                      <th className="p-2.5 text-center">Statut</th>
+                      <th className="p-2.5 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {staffList.map((s) => (
+                      <tr key={s.id} className="hover:bg-gray-50/50">
+                        <td className="p-2.5 font-bold">{s.full_name}</td>
+                        <td className="p-2.5 font-mono tracking-widest">{s.pin_code}</td>
+                        <td className="p-2.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${s.role === 'admin' ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-700'}`}>
+                            {s.role}
+                          </span>
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${s.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            {s.is_active ? 'Actif' : 'Désactivé'}
+                          </span>
+                        </td>
+                        <td className="p-2.5 text-center space-x-2">
+                          <button 
+                            onClick={() => { setEditingStaff(s); setStaffName(s.full_name); setStaffPin(s.pin_code); setStaffRole(s.role); }} 
+                            className="text-blue-500 hover:text-blue-700 font-bold"
+                          >
+                            Éditer
+                          </button>
+                          <button 
+                            onClick={() => handleToggleStaffStatus(s.id, s.is_active)} 
+                            className={`font-bold ${s.is_active ? 'text-red-500 hover:text-red-700' : 'text-green-600 hover:text-green-800'}`}
+                          >
+                            {s.is_active ? 'Désactiver' : 'Activer'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
