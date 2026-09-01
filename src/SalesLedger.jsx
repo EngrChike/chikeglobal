@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Trash2, Pencil, Phone, Search, Folder, FolderOpen, Calendar, Clock, User, ChevronDown, ChevronRight } from 'lucide-react';
+import { Trash2, Pencil, Phone, Search, Folder, FolderOpen, Calendar, Clock, User, ChevronDown, ChevronRight, UserCheck } from 'lucide-react';
 
 export default function SalesLedger({ products, customers, fetchProducts, fetchCustomers, supabase, currentUser }) {
   // Staging / Accumulator Cart State
@@ -69,7 +69,7 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
     if (currentUser) {
       fetchSalesHistory();
     }
-  }, [currentUser]); // Re-run if currentUser changes
+  }, [currentUser]);
 
   // Sync cart to local storage
   useEffect(() => {
@@ -159,6 +159,10 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
       return;
     }
 
+    // --- NEW: Confirmation Check Before Dropping Sale ---
+    const confirmSale = window.confirm("Confirmez-vous l'enregistrement de cette vente ? \nSi 'OK', la vente sera validée et les stocks déduits.");
+    if (!confirmSale) return;
+
     try {
       const balance = remainingDebt;
       const goodsDescription = cartItems.map(item => `${item.qty}x ${item.name} (${item.batch}) @ ${item.price} FCFA`).join(', ');
@@ -201,7 +205,8 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
       // Record Sale Payload
       const salePayload = {
         customer_id: targetCustomerId,
-        staff_id: currentUser?.id, // Attaching the staff ID here
+        staff_id: currentUser?.id,
+        staff_name: currentUser?.name || currentUser?.full_name || currentUser?.email || 'Vendeur', // --- NEW: Saving Staff Name ---
         date: currentDate,
         goods: goodsDescription,
         batch: cartItems.length === 1 ? cartItems[0].batch : 'MULTI-BATCH',
@@ -210,7 +215,7 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
         total: cartTotal,
         paid: paidAmount,
         type: 'Sale',
-        items: cartItems
+        items: cartItems // Crucial for editing/deleting later
       };
 
       // Safely attach extra metadata if DB columns exist
@@ -248,6 +253,82 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
       alert('Vente enregistrée avec succès !');
     } catch (err) {
       alert(`Erreur lors de l'enregistrement: ${err.message}`);
+    }
+  };
+
+  // --- NEW: Helper to Revert Stock and Debt for Edit/Delete ---
+  const revertSaleTransaction = async (sale) => {
+    // 1. Restore Stock
+    if (sale.items && Array.isArray(sale.items)) {
+      for (const item of sale.items) {
+        if (item.productId) {
+          const { data: prodData, error: prodErr } = await supabase.from('products').select('quantity').eq('id', item.productId).single();
+          if (!prodErr && prodData) {
+            const newQty = prodData.quantity + item.qty;
+            await supabase.from('products').update({ quantity: newQty, stock_status: true }).eq('id', item.productId);
+          }
+        }
+      }
+    }
+
+    // 2. Revert Customer Debt
+    if (sale.customer_id) {
+       const debtReduction = (sale.total || 0) - (sale.paid || 0);
+       if (debtReduction > 0) {
+         const { data: custData, error: custErr } = await supabase.from('customers').select('total_debt').eq('id', sale.customer_id).single();
+         if (!custErr && custData) {
+           const newDebt = Math.max(0, (parseFloat(custData.total_debt) || 0) - debtReduction);
+           await supabase.from('customers').update({ total_debt: newDebt }).eq('id', sale.customer_id);
+         }
+       }
+    }
+
+    // 3. Delete the history record
+    const { error: delErr } = await supabase.from('customer_history').delete().eq('id', sale.id);
+    if (delErr) throw delErr;
+  };
+
+  // --- NEW: Admin Delete Sale ---
+  const handleDeleteSale = async (sale) => {
+    if (!window.confirm("⚠️ ATTENTION : Voulez-vous vraiment SUPPRIMER cette vente ?\n\nLes articles seront remis en stock et la dette du client sera ajustée.")) return;
+    try {
+      await revertSaleTransaction(sale);
+      alert("Vente supprimée et stocks restaurés avec succès.");
+      await fetchProducts();
+      await fetchCustomers();
+      await fetchSalesHistory();
+    } catch (err) {
+      alert(`Erreur lors de la suppression : ${err.message}`);
+    }
+  };
+
+  // --- NEW: Admin Edit Sale ---
+  const handleEditSale = async (sale) => {
+    if (!sale.items || sale.items.length === 0) {
+      alert("Impossible de modifier : le détail des articles n'est pas disponible pour cette ancienne transaction.");
+      return;
+    }
+    
+    if (!window.confirm("Voulez-vous MODIFIER cette vente ?\n\nL'enregistrement actuel sera annulé, les stocks restaurés, et les articles seront replacés dans le panier pour que vous puissiez ajuster la transaction.")) return;
+    
+    try {
+      await revertSaleTransaction(sale);
+      
+      // Reload cart and form
+      setCartItems(sale.items);
+      setLedgerForm({
+        customerId: sale.customer_id ? String(sale.customer_id) : 'walkin',
+        newName: '',
+        newPhone: '',
+        initialPaid: sale.paid?.toString() || ''
+      });
+      
+      alert("Les articles ont été replacés dans le panier. Veuillez effectuer vos modifications et valider à nouveau la vente.");
+      await fetchProducts();
+      await fetchCustomers();
+      await fetchSalesHistory();
+    } catch (err) {
+      alert(`Erreur lors de la préparation de la modification : ${err.message}`);
     }
   };
 
@@ -290,7 +371,8 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
         (item.displayCustomer && item.displayCustomer.toLowerCase().includes(term)) ||
         (item.batch && item.batch.toLowerCase().includes(term)) ||
         (item.date && item.date.includes(term)) ||
-        (item.time && item.time.includes(term))
+        (item.time && item.time.includes(term)) ||
+        (item.staff_name && item.staff_name.toLowerCase().includes(term)) // Can now search by staff name
       );
     });
   }, [salesHistory, customers, searchTerm]);
@@ -519,7 +601,7 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
               <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
               <input 
                 type="text" 
-                placeholder="Rechercher (article, date, heure, lot...)" 
+                placeholder="Rechercher (article, date, vendeur, lot...)" 
                 value={searchTerm} 
                 onChange={(e) => setSearchTerm(e.target.value)} 
                 className="w-full pl-9 pr-3 py-1.5 border text-xs rounded-lg bg-gray-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-orange-500"
@@ -574,8 +656,9 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
                       <div className="p-3 bg-white space-y-2 max-h-96 overflow-y-auto">
                         {group.items.map((sale, idx) => (
                           <div key={idx} className="p-3 rounded-lg border border-gray-100 bg-gray-50/50 hover:bg-white hover:border-orange-200 transition-all text-xs space-y-1.5">
+                            
                             <div className="flex justify-between items-center text-gray-500 text-[10px]">
-                              <div className="flex items-center space-x-3">
+                              <div className="flex items-center flex-wrap gap-2">
                                 <span className="flex items-center font-bold text-gray-700">
                                   <Calendar className="w-3 h-3 mr-1 text-orange-500" />
                                   {sale.date || 'N/A'}
@@ -583,6 +666,11 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
                                 <span className="flex items-center font-bold text-gray-700">
                                   <Clock className="w-3 h-3 mr-1 text-orange-500" />
                                   {sale.time || sale.created_at?.slice(11, 16) || '--:--'}
+                                </span>
+                                {/* --- NEW: Display Staff Name --- */}
+                                <span className="flex items-center font-bold text-gray-700 bg-gray-200 px-2 py-0.5 rounded">
+                                  <UserCheck className="w-3 h-3 mr-1 text-blue-600" />
+                                  {sale.staff_name || 'Vendeur Inconnu'}
                                 </span>
                               </div>
                               <span className="flex items-center font-bold text-gray-800 bg-gray-200 px-2 py-0.5 rounded">
@@ -599,16 +687,36 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
                               <span className="text-gray-400 text-[10px]">
                                 Lot: <strong className="text-gray-600">{sale.batch || 'N/A'}</strong>
                               </span>
-                              <div className="space-x-2">
+                              
+                              <div className="flex items-center space-x-3">
                                 <span>Total: <strong>{sale.total?.toLocaleString()} FCFA</strong></span>
                                 <span className="text-green-600 font-bold">Payé: {sale.paid?.toLocaleString()} FCFA</span>
+                                
+                                {/* --- NEW: Admin Only Edit & Delete Controls --- */}
+                                {currentUser?.role === 'admin' && (
+                                  <div className="flex items-center space-x-1 pl-2 border-l border-gray-300">
+                                    <button 
+                                      onClick={() => handleEditSale(sale)} 
+                                      className="p-1 text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded transition-colors"
+                                      title="Modifier (Annule et replace au panier)"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDeleteSale(sale)} 
+                                      className="p-1 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded transition-colors"
+                                      title="Supprimer (Restaure les stocks)"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>
                         ))}
                       </div>
                     )}
-
                   </div>
                 );
               })
@@ -618,7 +726,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
               </div>
             )}
           </div>
-
         </div>
       </div>
     </div>
