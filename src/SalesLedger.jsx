@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Trash2, Pencil, Search, Folder, FolderOpen, Calendar, Clock, User, ChevronDown, ChevronRight, UserCheck, XCircle } from 'lucide-react';
+import { Trash2, Pencil, Search, Folder, FolderOpen, Calendar, Clock, User, ChevronDown, ChevronRight, UserCheck, X } from 'lucide-react';
 
 export default function SalesLedger({ products, customers, fetchProducts, fetchCustomers, supabase, currentUser }) {
   // Staging / Accumulator Cart State
@@ -15,7 +15,7 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
   // Independent Sales History State
   const [salesHistory, setSalesHistory] = useState([]);
 
-  // Active Sale Being Edited (null = New Sale Mode)
+  // Editing Sale State (Tracks if we are modifying an existing sale)
   const [editingSale, setEditingSale] = useState(null);
 
   // Adding Item State
@@ -51,7 +51,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
         .select('*')
         .order('id', { ascending: false });
 
-      // If the current user is NOT an admin, restrict fetch to their own sales only
       if (currentUser?.role !== 'admin') {
         query = query.eq('staff_id', currentUser?.id);
       }
@@ -72,12 +71,10 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
     }
   }, [currentUser]);
 
-  // Sync cart to local storage (only when not editing)
+  // Sync cart to local storage
   useEffect(() => {
-    if (!editingSale) {
-      localStorage.setItem('akuDonCart', JSON.stringify(cartItems));
-    }
-  }, [cartItems, editingSale]);
+    localStorage.setItem('akuDonCart', JSON.stringify(cartItems));
+  }, [cartItems]);
 
   const toggleMonth = (monthKey) => {
     setExpandedMonths(prev => ({
@@ -155,30 +152,51 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
   const paidAmount = ledgerForm.initialPaid !== '' ? parseFloat(ledgerForm.initialPaid) : cartTotal;
   const remainingDebt = Math.max(0, cartTotal - paidAmount);
 
-  // Activate In-Place Edit Mode
-  const handleEditSale = (sale) => {
-    if (!sale.items || sale.items.length === 0) {
-      alert("Impossible de modifier : le détail des articles n'est pas disponible pour cette ancienne transaction.");
-      return;
+  // Helper: Revert stock and customer debt for a given sale
+  const revertSaleStockAndDebt = async (sale) => {
+    // 1. Restore Stock in database
+    if (sale.items && Array.isArray(sale.items)) {
+      for (const item of sale.items) {
+        if (item.productId) {
+          const { data: prodData } = await supabase
+            .from('products')
+            .select('quantity')
+            .eq('id', item.productId)
+            .single();
+
+          if (prodData) {
+            const restoredQty = prodData.quantity + item.qty;
+            await supabase
+              .from('products')
+              .update({ quantity: restoredQty, stock_status: restoredQty > 0 })
+              .eq('id', item.productId);
+          }
+        }
+      }
     }
 
-    setEditingSale(sale);
-    setCartItems(sale.items);
-    setLedgerForm({
-      customerId: sale.customer_id ? String(sale.customer_id) : 'walkin',
-      newName: '',
-      newPhone: '',
-      initialPaid: sale.paid !== undefined ? sale.paid.toString() : ''
-    });
+    // 2. Revert Customer Debt
+    if (sale.customer_id) {
+      const debtReduction = (sale.total || 0) - (sale.paid || 0);
+      if (debtReduction > 0) {
+        const { data: custData } = await supabase
+          .from('customers')
+          .select('total_debt')
+          .eq('id', sale.customer_id)
+          .single();
+
+        if (custData) {
+          const newDebt = Math.max(0, (parseFloat(custData.total_debt) || 0) - debtReduction);
+          await supabase
+            .from('customers')
+            .update({ total_debt: newDebt })
+            .eq('id', sale.customer_id);
+        }
+      }
+    }
   };
 
-  const handleCancelEdit = () => {
-    setEditingSale(null);
-    setCartItems([]);
-    setLedgerForm({ customerId: 'walkin', newName: '', newPhone: '', initialPaid: '' });
-    localStorage.removeItem('akuDonCart');
-  };
-
+  // Finalize Sale (Handles both New Sales and Editing Existing Sales)
   const handleFinalizeSale = async (e) => {
     e.preventDefault();
     if (cartItems.length === 0) {
@@ -186,14 +204,16 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
       return;
     }
 
-    const isEditing = !!editingSale;
-    const confirmMessage = isEditing 
-      ? `Confirmez-vous la modification de la vente de ${editingSale.staff_name || 'ce vendeur'} ?\nLes stocks et le bilan client seront réajustés sans changer le vendeur d'origine.`
-      : "Confirmez-vous l'enregistrement de cette vente ? \nSi 'OK', la vente sera validée et les stocks déduits.";
-
-    if (!window.confirm(confirmMessage)) return;
+    const actionText = editingSale ? "la modification de cette vente" : "l'enregistrement de cette vente";
+    const confirmSale = window.confirm(`Confirmez-vous ${actionText} ?`);
+    if (!confirmSale) return;
 
     try {
+      // If editing, first revert stock and debt from original transaction
+      if (editingSale) {
+        await revertSaleStockAndDebt(editingSale);
+      }
+
       const balance = remainingDebt;
       const goodsDescription = cartItems.map(item => `${item.qty}x ${item.name} (${item.batch}) @ ${item.price} FCFA`).join(', ');
       
@@ -206,12 +226,11 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
       let targetCustomerId = null;
       let customerDisplayName = 'Client de Passage';
 
-      // Customer selection/creation handling
       if (ledgerForm.customerId === 'new') {
         const { data: newCustData, error: custErr } = await supabase.from('customers').insert([{
           name: ledgerForm.newName.trim() || 'Client de Passage',
           phone: ledgerForm.newPhone.trim() || '',
-          total_debt: 0
+          total_debt: balance
         }]).select().single();
 
         if (custErr) throw custErr;
@@ -222,108 +241,68 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
         const existingCust = customers.find(c => String(c.id) === String(ledgerForm.customerId));
         if (existingCust) {
           customerDisplayName = existingCust.name;
+          const currentDebt = parseFloat(existingCust.totalDebt) || 0;
+          const newTotalDebt = currentDebt + balance;
+          
+          const { error: updateErr } = await supabase.from('customers').update({
+            total_debt: newTotalDebt
+          }).eq('id', targetCustomerId);
+
+          if (updateErr) throw updateErr;
         }
       }
 
-      if (isEditing) {
-        // --- IN-PLACE UPDATE MODE ---
-        
-        // 1. Revert original stock deducted during initial sale
-        if (editingSale.items && Array.isArray(editingSale.items)) {
-          for (const item of editingSale.items) {
-            if (item.productId) {
-              const { data: prodData } = await supabase.from('products').select('quantity').eq('id', item.productId).single();
-              if (prodData) {
-                await supabase.from('products').update({
-                  quantity: prodData.quantity + item.qty,
-                  stock_status: true
-                }).eq('id', item.productId);
-              }
-            }
-          }
-        }
+      // Keep original staff info if editing, or set current user if new
+      const staffId = editingSale ? (editingSale.staff_id || currentUser?.id) : currentUser?.id;
+      const staffName = editingSale ? (editingSale.staff_name || 'Vendeur') : (currentUser?.name || currentUser?.full_name || currentUser?.email || 'Vendeur');
 
-        // 2. Revert previous customer debt addition
-        if (editingSale.customer_id) {
-          const previousDebt = (editingSale.total || 0) - (editingSale.paid || 0);
-          if (previousDebt > 0) {
-            const { data: oldCust } = await supabase.from('customers').select('total_debt').eq('id', editingSale.customer_id).single();
-            if (oldCust) {
-              const adjustedDebt = Math.max(0, (parseFloat(oldCust.total_debt) || 0) - previousDebt);
-              await supabase.from('customers').update({ total_debt: adjustedDebt }).eq('id', editingSale.customer_id);
-            }
-          }
-        }
+      const salePayload = {
+        customer_id: targetCustomerId,
+        staff_id: staffId,
+        staff_name: staffName,
+        goods: goodsDescription,
+        batch: cartItems.length === 1 ? cartItems[0].batch : 'MULTI-BATCH',
+        product_id: cartItems.length === 1 ? cartItems[0].productId : null,
+        qty: cartItems.reduce((sum, item) => sum + item.qty, 0),
+        total: cartTotal,
+        paid: paidAmount,
+        type: 'Sale',
+        items: cartItems
+      };
 
-        // 3. Apply new debt to target customer
-        if (targetCustomerId && balance > 0) {
-          const { data: currentCust } = await supabase.from('customers').select('total_debt').eq('id', targetCustomerId).single();
-          if (currentCust) {
-            const newDebtTotal = (parseFloat(currentCust.total_debt) || 0) + balance;
-            await supabase.from('customers').update({ total_debt: newDebtTotal }).eq('id', targetCustomerId);
-          }
-        }
+      try {
+        salePayload.customer_name = customerDisplayName;
+        salePayload.date = editingSale ? (editingSale.date || currentDate) : currentDate;
+        salePayload.time = editingSale ? (editingSale.time || currentTime) : currentTime;
+        salePayload.month_key = editingSale ? (editingSale.month_key || monthKey) : monthKey;
+        salePayload.month_label = editingSale ? (editingSale.month_label || monthLabel) : monthLabel;
+      } catch (e) {}
 
-        // 4. Update EXISTING sale record in DB while PRESERVING ORIGINAL SELLER
-        const updatePayload = {
-          customer_id: targetCustomerId,
-          customer_name: customerDisplayName,
-          goods: goodsDescription,
-          batch: cartItems.length === 1 ? cartItems[0].batch : 'MULTI-BATCH',
-          product_id: cartItems.length === 1 ? cartItems[0].productId : null,
-          qty: cartItems.reduce((sum, item) => sum + item.qty, 0),
-          total: cartTotal,
-          paid: paidAmount,
-          items: cartItems,
-          // PRESERVE ORIGINAL SELLER CREDENTIALS
-          staff_id: editingSale.staff_id,
-          staff_name: editingSale.staff_name || 'Vendeur'
-        };
-
-        const { error: updateErr } = await supabase
+      if (editingSale) {
+        // Update existing sale in place
+        const { error: updateHistErr } = await supabase
           .from('customer_history')
-          .update(updatePayload)
+          .update(salePayload)
           .eq('id', editingSale.id);
 
-        if (updateErr) throw updateErr;
-
+        if (updateHistErr) throw updateHistErr;
       } else {
-        // --- NEW SALE MODE ---
-        if (targetCustomerId && balance > 0) {
-          const existingCust = customers.find(c => String(c.id) === String(targetCustomerId));
-          const currentDebt = existingCust ? (parseFloat(existingCust.totalDebt) || 0) : 0;
-          await supabase.from('customers').update({ total_debt: currentDebt + balance }).eq('id', targetCustomerId);
-        }
-
-        const salePayload = {
-          customer_id: targetCustomerId,
-          staff_id: currentUser?.id,
-          staff_name: currentUser?.name || currentUser?.full_name || currentUser?.email || 'Vendeur',
-          date: currentDate,
-          goods: goodsDescription,
-          batch: cartItems.length === 1 ? cartItems[0].batch : 'MULTI-BATCH',
-          product_id: cartItems.length === 1 ? cartItems[0].productId : null,
-          qty: cartItems.reduce((sum, item) => sum + item.qty, 0),
-          total: cartTotal,
-          paid: paidAmount,
-          type: 'Sale',
-          items: cartItems,
-          customer_name: customerDisplayName,
-          time: currentTime,
-          month_key: monthKey,
-          month_label: monthLabel
-        };
-
+        // Insert new sale
         const { error: histErr } = await supabase.from('customer_history').insert([salePayload]);
         if (histErr) throw histErr;
       }
 
-      // Deduct stock for new/updated cart items
+      // Deduct Stock Levels for current cart
       for (const item of cartItems) {
         if (item.productId) {
-          const { data: latestProd } = await supabase.from('products').select('quantity').eq('id', item.productId).single();
-          if (latestProd) {
-            const newStock = Math.max(0, latestProd.quantity - item.qty);
+          const { data: freshProd } = await supabase
+            .from('products')
+            .select('quantity')
+            .eq('id', item.productId)
+            .single();
+
+          if (freshProd) {
+            const newStock = Math.max(0, freshProd.quantity - item.qty);
             await supabase.from('products').update({ 
               quantity: newStock, 
               stock_status: newStock > 0 
@@ -332,62 +311,66 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
         }
       }
 
-      setEditingSale(null);
       setLedgerForm({ customerId: 'walkin', newName: '', newPhone: '', initialPaid: '' });
       setCartItems([]);
+      setEditingSale(null);
       localStorage.removeItem('akuDonCart');
       
       await fetchProducts();
       await fetchCustomers();
       await fetchSalesHistory();
-      alert(isEditing ? 'Modifications enregistrées avec succès !' : 'Vente enregistrée avec succès !');
+      alert(editingSale ? 'Vente modifiée avec succès !' : 'Vente enregistrée avec succès !');
     } catch (err) {
       alert(`Erreur lors de l'enregistrement: ${err.message}`);
     }
   };
 
-  // Admin Delete Sale (Restores stocks and customer debt)
+  // Admin Delete Sale Action
   const handleDeleteSale = async (sale) => {
-    if (!window.confirm("⚠️ ATTENTION : Voulez-vous vraiment SUPPRIMER cette vente ?\n\nLes articles seront remis en stock et la dette du client sera ajustée.")) return;
+    const confirmDelete = window.confirm(
+      `⚠️ ATTENTION : Voulez-vous vraiment SUPPRIMER la vente de ${sale.goods} ?\n\n- Les articles seront remis en stock.\n- La dette éventuelle du client sera ajustée.`
+    );
+    if (!confirmDelete) return;
+
     try {
-      // 1. Restore Stock
-      if (sale.items && Array.isArray(sale.items)) {
-        for (const item of sale.items) {
-          if (item.productId) {
-            const { data: prodData } = await supabase.from('products').select('quantity').eq('id', item.productId).single();
-            if (prodData) {
-              await supabase.from('products').update({ 
-                quantity: prodData.quantity + item.qty, 
-                stock_status: true 
-              }).eq('id', item.productId);
-            }
-          }
-        }
-      }
-
-      // 2. Revert Customer Debt
-      if (sale.customer_id) {
-        const debtReduction = (sale.total || 0) - (sale.paid || 0);
-        if (debtReduction > 0) {
-          const { data: custData } = await supabase.from('customers').select('total_debt').eq('id', sale.customer_id).single();
-          if (custData) {
-            const newDebt = Math.max(0, (parseFloat(custData.total_debt) || 0) - debtReduction);
-            await supabase.from('customers').update({ total_debt: newDebt }).eq('id', sale.customer_id);
-          }
-        }
-      }
-
-      // 3. Delete from database
+      await revertSaleStockAndDebt(sale);
+      
       const { error: delErr } = await supabase.from('customer_history').delete().eq('id', sale.id);
       if (delErr) throw delErr;
 
-      alert("Vente supprimée et stocks restaurés avec succès.");
+      alert("Vente supprimée et articles remis en stock avec succès !");
       await fetchProducts();
       await fetchCustomers();
       await fetchSalesHistory();
     } catch (err) {
       alert(`Erreur lors de la suppression : ${err.message}`);
     }
+  };
+
+  // Prepare sale for inline editing
+  const handleEditSale = (sale) => {
+    if (!sale.items || sale.items.length === 0) {
+      alert("Impossible de modifier : le détail des articles n'est pas disponible pour cette ancienne transaction.");
+      return;
+    }
+
+    setEditingSale(sale);
+    setCartItems(sale.items);
+    setLedgerForm({
+      customerId: sale.customer_id ? String(sale.customer_id) : 'walkin',
+      newName: '',
+      newPhone: '',
+      initialPaid: sale.paid?.toString() || ''
+    });
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingSale(null);
+    setCartItems([]);
+    setLedgerForm({ customerId: 'walkin', newName: '', newPhone: '', initialPaid: '' });
+    localStorage.removeItem('akuDonCart');
   };
 
   // Helper to resolve Month Key & Label dynamically
@@ -461,30 +444,31 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* LEFT COLUMN: ACCUMULATION & SALE FORM */}
       <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-fit space-y-4">
-        <div className="flex justify-between items-center pb-2 border-b">
-          <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700">
-            {editingSale ? '✏️ Modification de Vente' : 'Caisse & Enregistrement Ventes'}
-          </h3>
+        <h3 className="font-bold text-xs uppercase tracking-wide text-gray-700 pb-2 border-b flex justify-between items-center">
+          <span>Caisse & Enregistrement Ventes</span>
           {editingSale && (
-            <button 
-              onClick={handleCancelEdit} 
-              className="text-xs text-red-600 hover:text-red-800 flex items-center font-bold"
-            >
-              <XCircle className="w-3.5 h-3.5 mr-1" /> Annuler
-            </button>
+            <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold">Mode Édition</span>
           )}
-        </div>
+        </h3>
 
-        {/* Editing Banner */}
+        {/* Edit Banner Notification */}
         {editingSale && (
-          <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-lg text-xs text-blue-900 space-y-0.5">
-            <p className="font-bold">Vous modifiez la vente #{editingSale.id}</p>
-            <p className="text-[10px]">
-              Vendeur conservé: <strong>{editingSale.staff_name || 'Vendeur'}</strong>
-            </p>
+          <div className="bg-amber-50 border border-amber-300 p-3 rounded-lg flex items-center justify-between text-amber-900 text-xs">
+            <div>
+              <p className="font-bold">✏️ Modification de la vente #{editingSale.id}</p>
+              <p className="text-[10px] text-amber-700">Vendeur d'origine : <strong>{editingSale.staff_name || 'Inconnu'}</strong></p>
+            </div>
+            <button
+              type="button"
+              onClick={handleCancelEdit}
+              className="p-1 text-amber-800 hover:bg-amber-200 rounded"
+              title="Annuler la modification"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
-        
+
         <form onSubmit={handleFinalizeSale} className="space-y-4">
           <div>
             <label className="text-[10px] text-gray-400 font-bold block mb-1">Type de Client</label>
@@ -659,9 +643,9 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
           <button 
             type="submit" 
             disabled={cartItems.length === 0} 
-            className={`w-full ${editingSale ? 'bg-blue-600 hover:bg-blue-700' : 'bg-black hover:bg-gray-800'} disabled:bg-gray-300 text-white text-xs py-3 rounded-lg font-bold uppercase tracking-wider transition-colors`}
+            className="w-full bg-black hover:bg-gray-800 disabled:bg-gray-300 text-white text-xs py-3 rounded-lg font-bold uppercase tracking-wider transition-colors"
           >
-            {editingSale ? 'Enregistrer les Modifications' : 'Valider et Enregistrer Vente'}
+            {editingSale ? 'Mettre à Jour la Vente' : 'Valider et Enregistrer Vente'}
           </button>
         </form>
       </div>
@@ -745,7 +729,7 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
                                   <Clock className="w-3 h-3 mr-1 text-orange-500" />
                                   {sale.time || sale.created_at?.slice(11, 16) || '--:--'}
                                 </span>
-                                {/* Display Original Staff Name */}
+                                {/* Display Staff Name */}
                                 <span className="flex items-center font-bold text-gray-700 bg-gray-200 px-2 py-0.5 rounded">
                                   <UserCheck className="w-3 h-3 mr-1 text-blue-600" />
                                   {sale.staff_name || 'Vendeur Inconnu'}
@@ -776,14 +760,14 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
                                     <button 
                                       onClick={() => handleEditSale(sale)} 
                                       className="p-1 text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded transition-colors"
-                                      title="Modifier cette vente"
+                                      title="Modifier la vente"
                                     >
                                       <Pencil className="w-3 h-3" />
                                     </button>
                                     <button 
                                       onClick={() => handleDeleteSale(sale)} 
                                       className="p-1 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded transition-colors"
-                                      title="Supprimer (Restaure les stocks)"
+                                      title="Supprimer la vente (restaure le stock)"
                                     >
                                       <Trash2 className="w-3 h-3" />
                                     </button>
