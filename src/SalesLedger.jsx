@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Trash2, Pencil, Search, Folder, FolderOpen, Calendar, Clock, User, ChevronDown, ChevronRight, UserCheck, X } from 'lucide-react';
+import { Trash2, Pencil, Search, Folder, FolderOpen, Calendar, Clock, User, ChevronDown, ChevronRight, UserCheck, X, AlertTriangle } from 'lucide-react';
 
 export default function SalesLedger({ products, customers, fetchProducts, fetchCustomers, supabase, currentUser }) {
   // Staging / Accumulator Cart State
@@ -154,28 +154,30 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
 
   // Helper: Revert stock and customer debt for a given sale
   const revertSaleStockAndDebt = async (sale) => {
-    // 1. Restore Stock in database
     if (sale.items && Array.isArray(sale.items)) {
       for (const item of sale.items) {
         if (item.productId) {
-          const { data: prodData } = await supabase
+          const { data: prodData, error: fetchErr } = await supabase
             .from('products')
             .select('quantity')
             .eq('id', item.productId)
             .single();
 
-          if (prodData) {
-            const restoredQty = prodData.quantity + item.qty;
-            await supabase
+          if (!fetchErr && prodData) {
+            const restoredQty = (prodData.quantity || 0) + item.qty;
+            const { error: updateErr } = await supabase
               .from('products')
               .update({ quantity: restoredQty, stock_status: restoredQty > 0 })
               .eq('id', item.productId);
+
+            if (updateErr) {
+              console.error(`Failed to restore stock for product ${item.productId}:`, updateErr);
+            }
           }
         }
       }
     }
 
-    // 2. Revert Customer Debt
     if (sale.customer_id) {
       const debtReduction = (sale.total || 0) - (sale.paid || 0);
       if (debtReduction > 0) {
@@ -196,6 +198,40 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
     }
   };
 
+  // Deduct Stock Levels in Database
+  const deductStockForCart = async (items) => {
+    for (const item of items) {
+      if (item.productId) {
+        const { data: freshProd, error: fetchErr } = await supabase
+          .from('products')
+          .select('quantity')
+          .eq('id', item.productId)
+          .single();
+
+        if (fetchErr) {
+          console.error(`Error fetching current stock for item ${item.productId}:`, fetchErr);
+          continue;
+        }
+
+        const currentQty = freshProd ? freshProd.quantity : 0;
+        const newStock = Math.max(0, currentQty - item.qty);
+
+        const { error: stockUpdateErr } = await supabase
+          .from('products')
+          .update({ 
+            quantity: newStock, 
+            stock_status: newStock > 0 
+          })
+          .eq('id', item.productId);
+
+        if (stockUpdateErr) {
+          console.error(`Failed to update stock for item ${item.productId}:`, stockUpdateErr);
+          alert(`Avertissement Stock: Impossible de réduire le stock pour ${item.name}. Vérifiez les permissions RLS Supabase.`);
+        }
+      }
+    }
+  };
+
   // Finalize Sale (Handles both New Sales and Editing Existing Sales)
   const handleFinalizeSale = async (e) => {
     e.preventDefault();
@@ -209,7 +245,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
     if (!confirmSale) return;
 
     try {
-      // If editing, first revert stock and debt from original transaction
       if (editingSale) {
         await revertSaleStockAndDebt(editingSale);
       }
@@ -252,7 +287,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
         }
       }
 
-      // Keep original staff info if editing, or set current user if new
       const staffId = editingSale ? (editingSale.staff_id || currentUser?.id) : currentUser?.id;
       const staffName = editingSale ? (editingSale.staff_name || 'Vendeur') : (currentUser?.name || currentUser?.full_name || currentUser?.email || 'Vendeur');
 
@@ -279,7 +313,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
       } catch (e) {}
 
       if (editingSale) {
-        // Update existing sale in place
         const { error: updateHistErr } = await supabase
           .from('customer_history')
           .update(salePayload)
@@ -287,29 +320,12 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
 
         if (updateHistErr) throw updateHistErr;
       } else {
-        // Insert new sale
         const { error: histErr } = await supabase.from('customer_history').insert([salePayload]);
         if (histErr) throw histErr;
       }
 
-      // Deduct Stock Levels for current cart
-      for (const item of cartItems) {
-        if (item.productId) {
-          const { data: freshProd } = await supabase
-            .from('products')
-            .select('quantity')
-            .eq('id', item.productId)
-            .single();
-
-          if (freshProd) {
-            const newStock = Math.max(0, freshProd.quantity - item.qty);
-            await supabase.from('products').update({ 
-              quantity: newStock, 
-              stock_status: newStock > 0 
-            }).eq('id', item.productId);
-          }
-        }
-      }
+      // Deduct product stock from DB
+      await deductStockForCart(cartItems);
 
       setLedgerForm({ customerId: 'walkin', newName: '', newPhone: '', initialPaid: '' });
       setCartItems([]);
@@ -729,7 +745,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
                                   <Clock className="w-3 h-3 mr-1 text-orange-500" />
                                   {sale.time || sale.created_at?.slice(11, 16) || '--:--'}
                                 </span>
-                                {/* Display Staff Name */}
                                 <span className="flex items-center font-bold text-gray-700 bg-gray-200 px-2 py-0.5 rounded">
                                   <UserCheck className="w-3 h-3 mr-1 text-blue-600" />
                                   {sale.staff_name || 'Vendeur Inconnu'}
@@ -754,7 +769,6 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
                                 <span>Total: <strong>{sale.total?.toLocaleString()} FCFA</strong></span>
                                 <span className="text-green-600 font-bold">Payé: {sale.paid?.toLocaleString()} FCFA</span>
                                 
-                                {/* Admin Only Edit & Delete Controls */}
                                 {currentUser?.role === 'admin' && (
                                   <div className="flex items-center space-x-1 pl-2 border-l border-gray-300">
                                     <button 
