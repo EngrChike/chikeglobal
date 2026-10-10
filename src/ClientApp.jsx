@@ -303,7 +303,7 @@ export default function ClientApp() {
                     <div className="p-3 flex-1 flex flex-col justify-between bg-white">
                       <div>
                         <div className="flex items-center space-x-1 mb-1">
-                          <span className="font-extrabold text-xs text-zinc-900 group-hover:text-[#f68b1e] transition-colors">La Sape</span>
+                          <span className="font-extrabold text-xs text-zinc-900 group-hover:text-[#f68b1e] transition-colors">Donchike</span>
                           <span className="text-blue-500 text-[10px] font-bold">✔</span>
                         </div>
                         <h3 className="text-sm md:text-base text-black line-clamp-2 min-h-[2.5rem] leading-tight font-extrabold">
