@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './utils/supabaseClient';
 import { ShoppingCart, Smartphone, Star, Heart, Video, Search, X, Lock, MapPin } from 'lucide-react';
 
@@ -12,10 +12,25 @@ export default function ClientApp() {
   const [storeBranch, setStoreBranch] = useState('Siège Principal');
   const [isLoading, setIsLoading] = useState(true);
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 15;
+  const topOfGridRef = useRef(null);
+
   // OFFICIAL LINKS & HANDLES
   const WHATSAPP_NUMBER = '2250100130109';
   const FACEBOOK_URL = 'https://facebook.com/profile.php?id=61590626370497';
   const TIKTOK_URL = 'https://tiktok.com/@your-profile';
+
+  // Helper to randomize array (Fisher-Yates shuffle)
+  const shuffleArray = (array) => {
+    let shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  };
 
   useEffect(() => {
     fetchActiveBranchAndProducts();
@@ -25,14 +40,12 @@ export default function ClientApp() {
     setIsLoading(true);
 
     try {
-      // 1. Fetch all branches to map IDs to Names
       const { data: branchesData } = await supabase
         .from('branches')
         .select('id, name');
 
       const branchesList = branchesData || [];
 
-      // 2. Fetch active branch ID from store_settings
       let activeBranchId = null;
       const { data: settingsData, error: settingsError } = await supabase
         .from('store_settings')
@@ -43,7 +56,6 @@ export default function ClientApp() {
         activeBranchId = settingsData.active_branch;
       }
 
-      // 3. Resolve active branch display name & query target
       let activeBranchName = 'Siège Principal';
       let selectedBranchId = null;
 
@@ -57,17 +69,12 @@ export default function ClientApp() {
 
       setStoreBranch(activeBranchName);
 
-      // 4. Build products query
       let query = supabase
         .from('products')
         .select('*')
         .eq('is_archived', false)
         .gt('quantity', 0);
 
-      // Logic:
-      // A) If no branches exist at all, display all available products.
-      // B) If a specific branch is active, filter by that branch's ID.
-      // C) If HQ / Siège Principal is active, fetch products with null branch_id.
       if (branchesList.length === 0) {
         // No branch filter applied
       } else if (selectedBranchId) {
@@ -76,10 +83,12 @@ export default function ClientApp() {
         query = query.is('branch_id', null);
       }
 
-      const { data, error } = await query.order('created_at', { ascending: false });
+      const { data, error } = await query; // Removed order() to allow full randomization
       
       if (!error && data) {
-        setProducts(data);
+        // Randomize products before setting state
+        const randomizedData = shuffleArray(data);
+        setProducts(randomizedData);
       } else if (error) {
         console.error("Error fetching products:", error.message);
       }
@@ -127,11 +136,9 @@ export default function ClientApp() {
   const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  // --- FACEBOOK PIXEL TRACKING ADDED HERE ---
   const handleWhatsAppCheckout = () => {
     if (cart.length === 0) return;
 
-    // 1. Trigger Facebook Meta Pixel "Lead" Event
     if (typeof window !== 'undefined' && window.fbq) {
       window.fbq('track', 'Lead', {
         value: cartTotal,
@@ -139,17 +146,16 @@ export default function ClientApp() {
       });
     }
 
-    // 2. Build the WhatsApp Message
     let msg = `✨ *CHIKE GLOBAL - NOUVELLE COMMANDE (${storeBranch})* ✨\n------------------------------------------\n\n`;
     cart.forEach((item, idx) => {
       msg += `🛍 *${idx + 1}. ${item.name}*\n  Prix: ${item.price.toLocaleString()} FCFA\n  Qté: ${item.quantity}\n------------------------------------------\n`;
     });
     msg += `\n🎯 *TOTAL GÉNÉRAL:* ${cartTotal.toLocaleString()} FCFA\n\nMerci de confirmer la disponibilité pour expédition immédiate !`;
     
-    // 3. Redirect to WhatsApp
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
+  // Filter products based on search
   const filteredProducts = products.filter(product => {
     const pName = product.name ? product.name.toLowerCase() : '';
     const pDesc = product.description ? product.description.toLowerCase() : '';
@@ -158,36 +164,48 @@ export default function ClientApp() {
     return pName.includes(query) || pDesc.includes(query);
   });
 
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
+  
+  // Get current page products
+  const currentProducts = filteredProducts.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
+    // Scroll back to the top of the product grid when changing pages
+    if (topOfGridRef.current) {
+      topOfGridRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f5f5f7] text-gray-900 font-sans antialiased relative">
       <header className="bg-white text-black sticky top-0 z-40 shadow-sm border-b border-gray-100 px-4 py-3">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center space-x-2.5 cursor-pointer shrink-0 group select-none" onClick={() => setSearchTerm('')}>
+          <div className="flex items-center space-x-2.5 cursor-pointer shrink-0 group select-none" onClick={() => {setSearchTerm(''); setCurrentPage(1);}}>
             <div className="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600 rounded-xl flex items-center justify-center shadow-md p-1.5">
              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
- 
-  <rect width="100" height="100" rx="28" fill="#f68b1e"/>
-  
-  
-  <path 
-    d="M30 25 C30 25, 45 15, 50 15 C55 15, 70 25, 70 25 C70 45, 60 75, 50 85 C40 75, 30 45, 30 25 Z" 
-    stroke="#FFFFFF" 
-    strokeWidth="7" 
-    strokeLinecap="round" 
-    strokeLinejoin="round" 
-    fill="none"
-  />
-  <circle cx="50" cy="42" r="7" fill="#FFFFFF"/>
-  <path 
-    d="M40 60 C45 65, 55 65, 60 60" 
-    stroke="#FFFFFF" 
-    strokeWidth="7" 
-    strokeLinecap="round" 
-    fill="none"
-  />
-</svg>
-
-
+              <rect width="100" height="100" rx="28" fill="#f68b1e"/>
+              <path 
+                d="M30 25 C30 25, 45 15, 50 15 C55 15, 70 25, 70 25 C70 45, 60 75, 50 85 C40 75, 30 45, 30 25 Z" 
+                stroke="#FFFFFF" 
+                strokeWidth="7" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                fill="none"
+              />
+              <circle cx="50" cy="42" r="7" fill="#FFFFFF"/>
+              <path 
+                d="M40 60 C45 65, 55 65, 60 60" 
+                stroke="#FFFFFF" 
+                strokeWidth="7" 
+                strokeLinecap="round" 
+                fill="none"
+              />
+            </svg>
             </div>
             <div className="flex flex-col justify-center">
               <span className="font-black text-base sm:text-xl tracking-wider uppercase text-zinc-900 leading-none group-hover:text-amber-600 transition-colors">CHIKE  </span>
@@ -233,18 +251,21 @@ export default function ClientApp() {
         </div>
 
         {/* SEARCH BAR */}
-        <div className="max-w-xl mx-auto mb-8 space-y-3 px-1">
+        <div ref={topOfGridRef} className="max-w-xl mx-auto mb-8 space-y-3 px-1 scroll-mt-24">
           <div className="relative flex items-center">
             <Search className="w-4 h-4 text-gray-400 absolute left-3.5 pointer-events-none" />
             <input 
               type="text" 
               placeholder="Rechercher un produit, une marque, un soin..." 
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1); // Reset to page 1 on new search
+              }}
               className="w-full bg-white text-sm text-black border border-gray-200 pl-10 pr-10 py-2.5 rounded-xl focus:outline-none focus:border-[#f68b1e] focus:ring-1 focus:ring-[#f68b1e] transition-all shadow-xs"
             />
             {searchTerm && (
-              <button onClick={() => setSearchTerm('')} className="absolute right-3 p-1 rounded-full text-gray-400 hover:text-black hover:bg-gray-100 transition-colors">
+              <button onClick={() => {setSearchTerm(''); setCurrentPage(1);}} className="absolute right-3 p-1 rounded-full text-gray-400 hover:text-black hover:bg-gray-100 transition-colors">
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
@@ -255,66 +276,109 @@ export default function ClientApp() {
           <div className="flex justify-center py-20">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#f68b1e]"></div>
           </div>
-        ) : filteredProducts.length === 0 ? (
+        ) : currentProducts.length === 0 ? (
           <div className="bg-white rounded-2xl p-16 text-center border border-gray-100">
-            <p className="text-gray-400 text-sm">Aucun produit disponible pour la boutique de {storeBranch}.</p>
+            <p className="text-gray-400 text-sm">Aucun produit trouvé pour la boutique de {storeBranch}.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-            {filteredProducts.map((p) => {
-              const itemQtyInCart = getProductCartQty(p.id);
+          <>
+            {/* PRODUCT GRID */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mb-10">
+              {currentProducts.map((p) => {
+                const itemQtyInCart = getProductCartQty(p.id);
 
-              return (
-                <div key={p.id} className="bg-white rounded-xl border border-gray-200/60 overflow-hidden flex flex-col justify-between group transition-all duration-300 hover:shadow-lg relative">
-                  <button className="absolute top-2 right-2 z-10 p-1.5 bg-white rounded-full shadow-sm text-gray-400 hover:text-red-500">
-                    <Heart className="w-3.5 h-3.5" />
-                  </button>
-                  <div className="relative bg-gray-50 aspect-[4/5] w-full overflow-hidden flex items-center justify-center border-b border-gray-100">
-                    <img src={p.image_url} alt={p.name} className="object-cover w-full h-full" />
-                    <div className="absolute bottom-2 left-2 z-10 flex flex-col gap-1">
-                      <span className="bg-[#f68b1e] text-white font-bold text-[10px] px-2 py-0.5 rounded shadow-md">
-                        {p.quantity} en stock
-                      </span>
-                    </div>
-                  </div>
-                  <div className="p-3 flex-1 flex flex-col justify-between bg-white">
-                    <div>
-                      <div className="flex items-center space-x-1 mb-1">
-                        <span className="font-extrabold text-xs text-zinc-900 group-hover:text-[#f68b1e] transition-colors">La Sape</span>
-                        <span className="text-blue-500 text-[10px] font-bold">✔</span>
+                return (
+                  <div key={p.id} className="bg-white rounded-xl border border-gray-200/60 overflow-hidden flex flex-col justify-between group transition-all duration-300 hover:shadow-lg relative">
+                    <button className="absolute top-2 right-2 z-10 p-1.5 bg-white rounded-full shadow-sm text-gray-400 hover:text-red-500">
+                      <Heart className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="relative bg-gray-50 aspect-[4/5] w-full overflow-hidden flex items-center justify-center border-b border-gray-100">
+                      <img src={p.image_url} alt={p.name} className="object-cover w-full h-full" />
+                      <div className="absolute bottom-2 left-2 z-10 flex flex-col gap-1">
+                        <span className="bg-[#f68b1e] text-white font-bold text-[10px] px-2 py-0.5 rounded shadow-md">
+                          {p.quantity} en stock
+                        </span>
                       </div>
-                      <h3 className="text-sm md:text-base text-black line-clamp-2 min-h-[2.5rem] leading-tight font-extrabold">
-                        {p.name} {p.description && <span className="font-normal text-gray-500 text-xs">
-{p.description}</span>}
-                      </h3>
-                      <div className="flex items-center space-x-1 mt-1.5">
-                        <div className="flex text-amber-400">
-                          {[...Array(5)].map((_, i) => <Star key={i} className="w-3 h-3 fill-amber-400 text-amber-400" />)}
+                    </div>
+                    <div className="p-3 flex-1 flex flex-col justify-between bg-white">
+                      <div>
+                        <div className="flex items-center space-x-1 mb-1">
+                          <span className="font-extrabold text-xs text-zinc-900 group-hover:text-[#f68b1e] transition-colors">La Sape</span>
+                          <span className="text-blue-500 text-[10px] font-bold">✔</span>
                         </div>
-                        <span className="text-[10px] text-gray-400 font-medium">(4.9)</span>
-                      </div>
-                    </div>
-                    <div className="mt-3">
-                      <p className="text-lg md:text-xl font-black text-[#f68b1e] tracking-tight mb-2">Prix: {p.price?.toLocaleString()} FCFA</p>
-                      <div className="mt-2.5">
-                        {itemQtyInCart > 0 ? (
-                          <div className="flex items-center justify-between border border-[#f68b1e] rounded-lg overflow-hidden bg-white h-7 shadow-sm">
-                            <button onClick={() => changeQuantity(p, -1)} className="bg-[#f68b1e]/5 text-[#f68b1e] w-8 h-full flex items-center justify-center font-bold">-</button>
-                            <span className="w-full text-center text-xs font-black text-black">{itemQtyInCart}</span>
-                            <button onClick={() => changeQuantity(p, 1)} className="bg-[#f68b1e]/5 text-[#f68b1e] w-8 h-full flex items-center justify-center font-bold">+</button>
+                        <h3 className="text-sm md:text-base text-black line-clamp-2 min-h-[2.5rem] leading-tight font-extrabold">
+                          {p.name} {p.description && <span className="font-normal text-gray-500 text-xs">{p.description}</span>}
+                        </h3>
+                        <div className="flex items-center space-x-1 mt-1.5">
+                          <div className="flex text-amber-400">
+                            {[...Array(5)].map((_, i) => <Star key={i} className="w-3 h-3 fill-amber-400 text-amber-400" />)}
                           </div>
-                        ) : (
-                          <button onClick={() => addToCart(p)} className="w-full bg-[#f68b1e] hover:bg-[#e07a16] text-white font-bold py-1.5 rounded-lg text-xs tracking-wide transition-all">
-                            Ajouter au panier
-                          </button>
-                        )}
+                          <span className="text-[10px] text-gray-400 font-medium">(4.9)</span>
+                        </div>
+                      </div>
+                      <div className="mt-3">
+                        <p className="text-lg md:text-xl font-black text-[#f68b1e] tracking-tight mb-2">Prix: {p.price?.toLocaleString()} FCFA</p>
+                        <div className="mt-2.5">
+                          {itemQtyInCart > 0 ? (
+                            <div className="flex items-center justify-between border border-[#f68b1e] rounded-lg overflow-hidden bg-white h-7 shadow-sm">
+                              <button onClick={() => changeQuantity(p, -1)} className="bg-[#f68b1e]/5 text-[#f68b1e] w-8 h-full flex items-center justify-center font-bold">-</button>
+                              <span className="w-full text-center text-xs font-black text-black">{itemQtyInCart}</span>
+                              <button onClick={() => changeQuantity(p, 1)} className="bg-[#f68b1e]/5 text-[#f68b1e] w-8 h-full flex items-center justify-center font-bold">+</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => addToCart(p)} className="w-full bg-[#f68b1e] hover:bg-[#e07a16] text-white font-bold py-1.5 rounded-lg text-xs tracking-wide transition-all">
+                              Ajouter au panier
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
+                );
+              })}
+            </div>
+
+            {/* PAGINATION CONTROLS */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center space-x-1.5 pb-8">
+                <button 
+                  onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-bold text-gray-600 bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                >
+                  &larr; Précédent
+                </button>
+                
+                <div className="flex items-center space-x-1 px-2">
+                  {[...Array(totalPages)].map((_, i) => {
+                    const pageNum = i + 1;
+                    const isActive = pageNum === currentPage;
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => handlePageChange(pageNum)}
+                        className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm font-black transition-colors ${
+                          isActive 
+                            ? 'bg-[#f68b1e] text-white shadow-sm border border-[#f68b1e]' 
+                            : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
+
+                <button 
+                  onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-bold text-gray-600 bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                >
+                  Suivant &rarr;
+                </button>
+              </div>
+            )}
+          </>
         )}
       </main>
 
