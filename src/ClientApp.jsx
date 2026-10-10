@@ -127,13 +127,26 @@ export default function ClientApp() {
   const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
+  // --- FACEBOOK PIXEL TRACKING ADDED HERE ---
   const handleWhatsAppCheckout = () => {
     if (cart.length === 0) return;
+
+    // 1. Trigger Facebook Meta Pixel "Lead" Event
+    if (typeof window !== 'undefined' && window.fbq) {
+      window.fbq('track', 'Lead', {
+        value: cartTotal,
+        currency: 'XOF' 
+      });
+    }
+
+    // 2. Build the WhatsApp Message
     let msg = `✨ *CHIKE GLOBAL - NOUVELLE COMMANDE (${storeBranch})* ✨\n------------------------------------------\n\n`;
     cart.forEach((item, idx) => {
       msg += `🛍 *${idx + 1}. ${item.name}*\n  Prix: ${item.price.toLocaleString()} FCFA\n  Qté: ${item.quantity}\n------------------------------------------\n`;
     });
     msg += `\n🎯 *TOTAL GÉNÉRAL:* ${cartTotal.toLocaleString()} FCFA\n\nMerci de confirmer la disponibilité pour expédition immédiate !`;
+    
+    // 3. Redirect to WhatsApp
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
@@ -159,17 +172,17 @@ export default function ClientApp() {
   <path 
     d="M30 25 C30 25, 45 15, 50 15 C55 15, 70 25, 70 25 C70 45, 60 75, 50 85 C40 75, 30 45, 30 25 Z" 
     stroke="#FFFFFF" 
-    stroke-width="7" 
-    stroke-linecap="round" 
-    stroke-linejoin="round" 
+    strokeWidth="7" 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
     fill="none"
   />
   <circle cx="50" cy="42" r="7" fill="#FFFFFF"/>
   <path 
     d="M40 60 C45 65, 55 65, 60 60" 
     stroke="#FFFFFF" 
-    stroke-width="7" 
-    stroke-linecap="round" 
+    strokeWidth="7" 
+    strokeLinecap="round" 
     fill="none"
   />
 </svg>
@@ -271,7 +284,8 @@ export default function ClientApp() {
                         <span className="text-blue-500 text-[10px] font-bold">✔</span>
                       </div>
                       <h3 className="text-sm md:text-base text-black line-clamp-2 min-h-[2.5rem] leading-tight font-extrabold">
-                        {p.name} {p.description && <span className="font-normal text-gray-500 text-xs"> • {p.description}</span>}
+                        {p.name} {p.description && <span className="font-normal text-gray-500 text-xs">
+{p.description}</span>}
                       </h3>
                       <div className="flex items-center space-x-1 mt-1.5">
                         <div className="flex text-amber-400">
