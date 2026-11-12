@@ -1,5 +1,5 @@
 ﻿import React from 'react';
-import { Layers, ArrowRightLeft, X, Pencil, Archive, ReceiptText } from 'lucide-react';
+import { Layers, ArrowRightLeft, X, Pencil, Archive, ReceiptText, Trash2 } from 'lucide-react';
 
 export default function InventoryManagement({
   branches = [],
@@ -32,8 +32,41 @@ export default function InventoryManagement({
   filteredProducts = [],
   handleUpdateStockVolume,
   handleStartEditProduct,
-  handleArchiveProduct
+  handleArchiveProduct,
+  supabase,
+  verifyAdminPinBeforeAction,
+  fetchProducts,
+  setProducts
 }) {
+
+  // Secure Product Deletion Handler with Admin PIN & Immediate State Deduction
+  const handleDeleteProduct = async (product) => {
+    if (verifyAdminPinBeforeAction) {
+      const authorized = await verifyAdminPinBeforeAction();
+      if (!authorized) return;
+    }
+
+    if (!window.confirm(`Êtes-vous sûr de vouloir supprimer définitivement "${product.name}" ? Cette action est irréversible et déduira le stock immédiatement.`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase.from('products').delete().eq('id', product.id);
+      if (error) throw error;
+
+      // Immediate local state deduction / removal
+      if (setProducts) {
+        setProducts(prev => prev.filter(p => String(p.id) !== String(product.id)));
+      } else if (fetchProducts) {
+        await fetchProducts();
+      }
+
+      alert("Produit supprimé avec succès et stock mis à jour !");
+    } catch (err) {
+      alert(`Erreur lors de la suppression : ${err.message}`);
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
       
@@ -274,6 +307,13 @@ export default function InventoryManagement({
                             className={`${p.is_archived ? "text-emerald-600 hover:text-emerald-800" : "text-gray-400 hover:text-red-600"} transition-colors p-1`}
                           >
                             <Archive className="w-4 h-4" />
+                          </button>
+                          <button 
+                            title="Supprimer Définitivement (PIN Admin requis)" 
+                            onClick={() => handleDeleteProduct(p)} 
+                            className="text-gray-400 hover:text-rose-600 transition-colors p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
