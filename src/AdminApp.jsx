@@ -1038,6 +1038,9 @@ export default function AdminApp({ currentUser, supabase }) {
             handleUpdateStockVolume={handleUpdateStockVolume}
             handleStartEditProduct={handleStartEditProduct}
             handleArchiveProduct={handleArchiveProduct}
+            supabase={supabase}                     // 👈 Injected supabase client prop
+            verifyAdminPinBeforeAction={verifyAdminPinBeforeAction} // 👈 Injected PIN verification prop
+            setProducts={setProducts}               // 👈 Injected state setter for immediate UI removal
           />
         )}
 

@@ -33,10 +33,10 @@ export default function InventoryManagement({
   handleUpdateStockVolume,
   handleStartEditProduct,
   handleArchiveProduct,
-  supabase,                    // 👈 Received from parent
-  verifyAdminPinBeforeAction,  // 👈 Received from parent
-  fetchProducts,               // 👈 Received from parent
-  setProducts                  // 👈 Received from parent
+  supabase,                    // 👈 Receives Supabase client from AdminApp
+  verifyAdminPinBeforeAction,  // 👈 Receives Admin PIN modal trigger from AdminApp
+  fetchProducts,               // Optional fallback refresher
+  setProducts                  // Optional state updater
 }) {
 
   // Secure Product Deletion Handler with Admin PIN & Immediate State Deduction
