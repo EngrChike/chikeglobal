@@ -972,14 +972,14 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
               {/* Header */}
               <div className="flex justify-between items-start border-b border-gray-100 pb-4">
                 <div>
-                  <h1 className="text-xl font-black tracking-wider uppercase leading-tight">Z IKENNA GLOBAL RESOURCES</h1>
-                  <p className="text-[11px] font-semibold mt-1 leading-tight text-gray-600">B56, ABIA PLAZA BBA TRADE FAIR COMPLEX UPSTAIR. LAGOS NIGERIA</p>
-                  <p className="text-[11px] font-semibold leading-tight text-gray-600">WhatsApp: +2347060433000</p>
+                  <h1 className="text-xl font-black tracking-wider uppercase leading-tight">CHIKE GLOBAL</h1>
+                  <p className="text-[11px] font-semibold mt-1 leading-tight text-gray-600">COCOVICO MARCHE ANGRE COCODY ABIDJAN</p>
+                  <p className="text-[11px] font-semibold leading-tight text-gray-600">WhatsApp: +2250100130109</p>
                 </div>
                 <div className="text-right flex flex-col items-end">
-                  {/* "ZIG" LOGO BLOCK */}
+                  {/* "CG" LOGO BLOCK */}
                   <div className="w-12 h-12 flex items-center justify-center bg-[#202737] rounded-xl text-white font-black text-xl mb-3">
-                    ZIG
+                    CG
                   </div>
                   <span className="bg-[#202737] text-white font-bold text-xs px-3 py-1 rounded uppercase tracking-wider">INVOICE</span>
                   <p className="text-[11px] font-mono font-bold mt-2 text-gray-600">Ref: #{activeInvoiceSale.id}</p>
@@ -1053,7 +1053,7 @@ export default function SalesLedger({ products, customers, fetchProducts, fetchC
 
               {/* Footer Note */}
               <div className="text-center pt-4 border-t border-gray-200 text-[11px] text-gray-500 font-medium">
-                Thank you for your business! • Z Ikenna Global Resources
+                Thank you for your business! • CHIKE GLOBAL
               </div>
 
             </div>
